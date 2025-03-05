@@ -44,7 +44,7 @@ impl<Scalar: PrimeField + PrimeFieldBits> StepCircuit<Scalar> for Sha256Circuit<
     1
   }
 
-  fn synthesize<CS: ConstraintSystem<Scalar>>(
+  fn synthesize<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     cs: &mut CS,
     _z: &[AllocatedNum<Scalar>],

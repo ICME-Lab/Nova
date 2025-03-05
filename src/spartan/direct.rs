@@ -23,13 +23,13 @@ use core::marker::PhantomData;
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
-struct DirectCircuit<E: Engine, SC: StepCircuit<E::Scalar>> {
+struct DirectCircuit<E: Engine, const NumSplits: usize, SC: StepCircuit<E::Scalar, NumSplits>> {
   z_i: Option<Vec<E::Scalar>>, // inputs to the circuit
   sc: SC,                      // step circuit to be executed
 }
 
-impl<E: Engine, SC: StepCircuit<E::Scalar>> Circuit<E::Scalar> for DirectCircuit<E, SC> {
-  fn synthesize<CS: ConstraintSystem<E::Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<E: Engine, const NumSplits: usize, SC: StepCircuit<E::Scalar, NumSplits>> Circuit<E::Scalar, NumSplits> for DirectCircuit<E, NumSplits, SC> {
+  fn synthesize<CS: ConstraintSystem<E::Scalar, NumSplits>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
     // obtain the arity information
     let arity = self.sc.arity();
 
@@ -41,7 +41,7 @@ impl<E: Engine, SC: StepCircuit<E::Scalar>> Circuit<E::Scalar> for DirectCircuit
           Ok(self.z_i.as_ref().unwrap_or(&zero)[i])
         })
       })
-      .collect::<Result<Vec<AllocatedNum<E::Scalar>>, _>>()?;
+      .collect::<Result<Vec<AllocatedNum<E::Scalar, NumSplits>>, _>>()?;
 
     let z_i_plus_one = self.sc.synthesize(&mut cs.namespace(|| "F"), &z_i)?;
 
@@ -92,11 +92,11 @@ impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>> VerifierKey<E, S> {
 /// A direct SNARK proving a step circuit
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct DirectSNARK<E, S, C>
+pub struct DirectSNARK<E, S, C, const NumSplits: usize>
 where
   E: Engine,
   S: RelaxedR1CSSNARKTrait<E>,
-  C: StepCircuit<E::Scalar>,
+  C: StepCircuit<E::Scalar, NumSplits>,
 {
   comm_W: Commitment<E>, // commitment to the witness
   blind_r_W: E::Scalar,
@@ -104,13 +104,13 @@ where
   _p: PhantomData<C>,
 }
 
-impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>, C: StepCircuit<E::Scalar>> DirectSNARK<E, S, C> {
+impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>, C: StepCircuit<E::Scalar, NumSplits>, const NumSplits: usize> DirectSNARK<E, S, C, NumSplits> {
   /// Produces prover and verifier keys for the direct SNARK
   pub fn setup(sc: C) -> Result<(ProverKey<E, S>, VerifierKey<E, S>), NovaError> {
     // construct a circuit that can be synthesized
-    let circuit: DirectCircuit<E, C> = DirectCircuit { z_i: None, sc };
+    let circuit: DirectCircuit<E, NumSplits, C> = DirectCircuit { z_i: None, sc };
 
-    let mut cs: ShapeCS<E> = ShapeCS::new();
+    let mut cs: ShapeCS<E, NumSplits> = ShapeCS::new();
     let _ = circuit.synthesize(&mut cs);
 
     let (shape, ck) = cs.r1cs_shape(&*S::ck_floor());
@@ -128,9 +128,9 @@ impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>, C: StepCircuit<E::Scalar>> DirectSN
 
   /// Produces a proof of satisfiability of the provided circuit
   pub fn prove(pk: &ProverKey<E, S>, sc: C, z_i: &[E::Scalar]) -> Result<Self, NovaError> {
-    let mut cs = SatisfyingAssignment::<E>::new();
+    let mut cs = SatisfyingAssignment::<E, NumSplits>::new();
 
-    let circuit: DirectCircuit<E, C> = DirectCircuit {
+    let circuit: DirectCircuit<E, NumSplits, C> = DirectCircuit {
       z_i: Some(z_i.to_vec()),
       sc,
     };

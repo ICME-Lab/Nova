@@ -15,11 +15,11 @@ use ff::PrimeField;
 use std::{collections::VecDeque, marker::PhantomData};
 
 /// The Poseidon sponge circuit
-pub struct SpongeCircuit<'a, F, A, C>
+pub struct SpongeCircuit<'a, F, A, const NumSplits: usize, C>
 where
   F: PrimeField,
   A: Arity<F>,
-  C: ConstraintSystem<F>,
+  C: ConstraintSystem<F, NumSplits>,
 {
   constants: &'a PoseidonConstants<F, A>,
   mode: Mode,
@@ -28,19 +28,19 @@ where
   squeezed: usize,
   squeeze_pos: usize,
   permutation_count: usize,
-  state: PoseidonCircuit2<'a, F, A>,
-  queue: VecDeque<Elt<F>>,
+  state: PoseidonCircuit2<'a, F, A, NumSplits>,
+  queue: VecDeque<Elt<F, NumSplits>>,
   pattern: IOPattern,
   io_count: usize,
   poseidon: Poseidon<'a, F, A>,
   _c: PhantomData<C>,
 }
 
-impl<'a, F: PrimeField, A: Arity<F>, CS: 'a + ConstraintSystem<F>> SpongeTrait<'a, F, A>
-  for SpongeCircuit<'a, F, A, CS>
+impl<'a, F: PrimeField, A: Arity<F>, const NumSplits: usize, CS: 'a + ConstraintSystem<F, NumSplits>> SpongeTrait<'a, F, A>
+  for SpongeCircuit<'a, F, A, NumSplits, CS>
 {
-  type Acc = Namespace<'a, F, CS>;
-  type Elt = Elt<F>;
+  type Acc = Namespace<'a, F, NumSplits, CS>;
+  type Elt = Elt<F, NumSplits>;
   type Error = SynthesisError;
 
   fn new_with_constants(constants: &'a PoseidonConstants<F, A>, mode: Mode) -> Self {
@@ -157,11 +157,11 @@ impl<'a, F: PrimeField, A: Arity<F>, CS: 'a + ConstraintSystem<F>> SpongeTrait<'
   }
 }
 
-impl<'a, F: PrimeField, A: Arity<F>, CS: 'a + ConstraintSystem<F>> InnerSpongeAPI<F, A>
-  for SpongeCircuit<'a, F, A, CS>
+impl<'a, F: PrimeField, A: Arity<F>, const NumSplits: usize, CS: 'a + ConstraintSystem<F, NumSplits>> InnerSpongeAPI<F, A>
+  for SpongeCircuit<'a, F, A, NumSplits, CS>
 {
-  type Acc = Namespace<'a, F, CS>;
-  type Value = Elt<F>;
+  type Acc = Namespace<'a, F, NumSplits, CS>;
+  type Value = Elt<F, NumSplits>;
 
   fn initialize_capacity(&mut self, tag: u128, _acc: &mut Self::Acc) {
     let mut repr = F::Repr::default();
@@ -184,7 +184,7 @@ impl<'a, F: PrimeField, A: Arity<F>, CS: 'a + ConstraintSystem<F>> InnerSpongeAP
 
   // Supplemental methods needed for a generic implementation.
 
-  fn zero() -> Elt<F> {
+  fn zero() -> Elt<F, NumSplits> {
     Elt::num_from_fr::<CS>(F::ZERO)
   }
 
@@ -203,7 +203,7 @@ impl<'a, F: PrimeField, A: Arity<F>, CS: 'a + ConstraintSystem<F>> InnerSpongeAP
   fn set_squeeze_pos(&mut self, pos: usize) {
     SpongeTrait::set_squeeze_pos(self, pos);
   }
-  fn add(a: Elt<F>, b: &Elt<F>) -> Elt<F> {
+  fn add(a: Elt<F, NumSplits>, b: &Elt<F, NumSplits>) -> Elt<F, NumSplits> {
     a.add_ref(b).unwrap()
   }
 

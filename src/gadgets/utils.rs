@@ -11,13 +11,13 @@ use ff::{Field, PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
 
 /// Gets as input the little indian representation of a number and spits out the number
-pub fn le_bits_to_num<Scalar, CS>(
+pub fn le_bits_to_num<Scalar, CS, const NumSplits: usize>(
   mut cs: CS,
   bits: &[AllocatedBit],
-) -> Result<AllocatedNum<Scalar>, SynthesisError>
+) -> Result<AllocatedNum<Scalar, NumSplits>, SynthesisError>
 where
   Scalar: PrimeField + PrimeFieldBits,
-  CS: ConstraintSystem<Scalar>,
+  CS: ConstraintSystem<Scalar, NumSplits>,
 {
   // We loop over the input bits and construct the constraint
   // and the field element that corresponds to the result
@@ -44,7 +44,7 @@ where
 }
 
 /// Allocate a variable that is set to zero
-pub fn alloc_zero<F: PrimeField, CS: ConstraintSystem<F>>(mut cs: CS) -> AllocatedNum<F> {
+pub fn alloc_zero<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(mut cs: CS) -> AllocatedNum<F, NumSplits> {
   let zero = AllocatedNum::alloc_infallible(cs.namespace(|| "alloc"), || F::ZERO);
   cs.enforce(
     || "check zero is valid",
@@ -56,7 +56,7 @@ pub fn alloc_zero<F: PrimeField, CS: ConstraintSystem<F>>(mut cs: CS) -> Allocat
 }
 
 /// Allocate a variable that is set to one
-pub fn alloc_one<F: PrimeField, CS: ConstraintSystem<F>>(mut cs: CS) -> AllocatedNum<F> {
+pub fn alloc_one<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(mut cs: CS) -> AllocatedNum<F, NumSplits> {
   let one = AllocatedNum::alloc_infallible(cs.namespace(|| "alloc"), || F::ONE);
   cs.enforce(
     || "check one is valid",
@@ -69,14 +69,14 @@ pub fn alloc_one<F: PrimeField, CS: ConstraintSystem<F>>(mut cs: CS) -> Allocate
 }
 
 /// Allocate a scalar as a base. Only to be used is the scalar fits in base!
-pub fn alloc_scalar_as_base<E, CS>(
+pub fn alloc_scalar_as_base<E, const NumSplits: usize, CS>(
   mut cs: CS,
   input: Option<E::Scalar>,
-) -> Result<AllocatedNum<E::Base>, SynthesisError>
+) -> Result<AllocatedNum<E::Base, NumSplits>, SynthesisError>
 where
   E: Engine,
   <E as Engine>::Scalar: PrimeFieldBits,
-  CS: ConstraintSystem<<E as Engine>::Base>,
+  CS: ConstraintSystem<<E as Engine>::Base, NumSplits>,
 {
   AllocatedNum::alloc(cs.namespace(|| "allocate scalar as base"), || {
     let input_bits = input.unwrap_or(E::Scalar::ZERO).clone().to_le_bits();
@@ -107,12 +107,12 @@ pub fn scalar_as_base<E: Engine>(input: E::Scalar) -> E::Base {
 }
 
 /// Allocate bignat a constant
-pub fn alloc_bignat_constant<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn alloc_bignat_constant<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
   val: &BigInt,
   limb_width: usize,
   n_limbs: usize,
-) -> Result<BigNat<F>, SynthesisError> {
+) -> Result<BigNat<F, NumSplits>, SynthesisError> {
   let limbs = nat_to_limbs(val, limb_width, n_limbs).unwrap();
   let bignat = BigNat::alloc_from_limbs(
     cs.namespace(|| "alloc bignat"),
@@ -134,10 +134,10 @@ pub fn alloc_bignat_constant<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// Check that two numbers are equal and return a bit
-pub fn alloc_num_equals<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn alloc_num_equals<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
+  a: &AllocatedNum<F, NumSplits>,
+  b: &AllocatedNum<F, NumSplits>,
 ) -> Result<AllocatedBit, SynthesisError> {
   // Allocate and constrain `r`: result boolean bit.
   // It equals `true` if `a` equals `b`, `false` otherwise
@@ -178,12 +178,12 @@ pub fn alloc_num_equals<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition return a otherwise b
-pub fn conditionally_select<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn conditionally_select<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
+  a: &AllocatedNum<F, NumSplits>,
+  b: &AllocatedNum<F, NumSplits>,
   condition: &Boolean,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? {
       Ok(*a.get_value().get()?)
@@ -205,28 +205,28 @@ pub fn conditionally_select<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition return a otherwise b
-pub fn conditionally_select_vec<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn conditionally_select_vec<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &[AllocatedNum<F>],
-  b: &[AllocatedNum<F>],
+  a: &[AllocatedNum<F, NumSplits>],
+  b: &[AllocatedNum<F, NumSplits>],
   condition: &Boolean,
-) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+) -> Result<Vec<AllocatedNum<F, NumSplits>>, SynthesisError> {
   a.iter()
     .zip(b.iter())
     .enumerate()
     .map(|(i, (a, b))| {
       conditionally_select(cs.namespace(|| format!("select_{i}")), a, b, condition)
     })
-    .collect::<Result<Vec<AllocatedNum<F>>, SynthesisError>>()
+    .collect::<Result<Vec<AllocatedNum<F, NumSplits>>, SynthesisError>>()
 }
 
 /// If condition return a otherwise b where a and b are `BigNats`
-pub fn conditionally_select_bignat<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn conditionally_select_bignat<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &BigNat<F>,
-  b: &BigNat<F>,
+  a: &BigNat<F, NumSplits>,
+  b: &BigNat<F, NumSplits>,
   condition: &Boolean,
-) -> Result<BigNat<F>, SynthesisError> {
+) -> Result<BigNat<F, NumSplits>, SynthesisError> {
   assert!(a.limbs.len() == b.limbs.len());
   let c = BigNat::alloc_from_nat(
     cs.namespace(|| "conditional select result"),
@@ -256,12 +256,12 @@ pub fn conditionally_select_bignat<F: PrimeField, CS: ConstraintSystem<F>>(
 
 /// Same as the above but Condition is an `AllocatedNum` that needs to be
 /// 0 or 1. 1 => True, 0 => False
-pub fn conditionally_select2<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn conditionally_select2<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+  a: &AllocatedNum<F, NumSplits>,
+  b: &AllocatedNum<F, NumSplits>,
+  condition: &AllocatedNum<F, NumSplits>,
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? == F::ONE {
       Ok(*a.get_value().get()?)
@@ -283,11 +283,11 @@ pub fn conditionally_select2<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition set to 0 otherwise a. Condition is an allocated num
-pub fn select_zero_or_num2<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn select_zero_or_num2<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+  a: &AllocatedNum<F, NumSplits>,
+  condition: &AllocatedNum<F, NumSplits>,
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? == F::ONE {
       Ok(F::ZERO)
@@ -308,11 +308,11 @@ pub fn select_zero_or_num2<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition set to a otherwise 0. Condition is an allocated num
-pub fn select_num_or_zero2<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn select_num_or_zero2<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+  a: &AllocatedNum<F, NumSplits>,
+  condition: &AllocatedNum<F, NumSplits>,
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? == F::ONE {
       Ok(*a.get_value().get()?)
@@ -332,11 +332,11 @@ pub fn select_num_or_zero2<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition set to a otherwise 0
-pub fn select_num_or_zero<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn select_num_or_zero<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
+  a: &AllocatedNum<F, NumSplits>,
   condition: &Boolean,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? {
       Ok(*a.get_value().get()?)
@@ -356,11 +356,11 @@ pub fn select_num_or_zero<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition set to 1 otherwise a
-pub fn select_one_or_num2<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn select_one_or_num2<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+  a: &AllocatedNum<F, NumSplits>,
+  condition: &AllocatedNum<F, NumSplits>,
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? == F::ONE {
       Ok(F::ONE)
@@ -379,12 +379,12 @@ pub fn select_one_or_num2<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition set to 1 otherwise a - b
-pub fn select_one_or_diff2<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn select_one_or_diff2<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+  a: &AllocatedNum<F, NumSplits>,
+  b: &AllocatedNum<F, NumSplits>,
+  condition: &AllocatedNum<F, NumSplits>,
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? == F::ONE {
       Ok(F::ONE)
@@ -403,11 +403,11 @@ pub fn select_one_or_diff2<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 /// If condition set to a otherwise 1 for boolean conditions
-pub fn select_num_or_one<F: PrimeField, CS: ConstraintSystem<F>>(
+pub fn select_num_or_one<F: PrimeField, const NumSplits: usize, CS: ConstraintSystem<F, NumSplits>>(
   mut cs: CS,
-  a: &AllocatedNum<F>,
+  a: &AllocatedNum<F, NumSplits>,
   condition: &Boolean,
-) -> Result<AllocatedNum<F>, SynthesisError> {
+) -> Result<AllocatedNum<F, NumSplits>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
     if *condition.get_value().get()? {
       Ok(*a.get_value().get()?)

@@ -12,26 +12,26 @@ use std::{
 
 #[derive(Clone)]
 /// A representation of a bit
-pub struct Bit<Scalar: PrimeField> {
+pub struct Bit<Scalar: PrimeField, const NumSplits: usize> {
   /// The linear combination which constrain the value of the bit
-  pub bit: LinearCombination<Scalar>,
+  pub bit: LinearCombination<Scalar, NumSplits>,
 }
 
 #[derive(Clone)]
 /// A representation of a bit-vector
-pub struct Bitvector<Scalar: PrimeField> {
+pub struct Bitvector<Scalar: PrimeField, const NumSplits: usize> {
   /// The linear combination which constrain the values of the bits
-  pub bits: Vec<LinearCombination<Scalar>>,
+  pub bits: Vec<LinearCombination<Scalar, NumSplits>>,
   /// The value of the bits (filled at witness-time)
   pub values: Option<Vec<bool>>,
   /// Allocated bit variables
-  pub allocations: Vec<Bit<Scalar>>,
+  pub allocations: Vec<Bit<Scalar, NumSplits>>,
 }
 
-impl<Scalar: PrimeField> Bit<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> Bit<Scalar, NumSplits> {
   /// Allocate a variable in the constraint system which can only be a
   /// boolean value.
-  pub fn alloc<CS: ConstraintSystem<Scalar>>(
+  pub fn alloc<CS: ConstraintSystem<Scalar, NumSplits>>(
     mut cs: CS,
     value: Option<bool>,
   ) -> Result<Self, SynthesisError> {
@@ -61,18 +61,18 @@ impl<Scalar: PrimeField> Bit<Scalar> {
   }
 }
 
-pub struct Num<Scalar: PrimeField> {
-  pub(crate) num: LinearCombination<Scalar>,
+pub struct Num<Scalar: PrimeField, const NumSplits: usize> {
+  pub(crate) num: LinearCombination<Scalar, NumSplits>,
   pub(crate) value: Option<Scalar>,
 }
 
-impl<Scalar: PrimeField> Num<Scalar> {
-  pub const fn new(value: Option<Scalar>, num: LinearCombination<Scalar>) -> Self {
+impl<Scalar: PrimeField, const NumSplits: usize> Num<Scalar, NumSplits> {
+  pub const fn new(value: Option<Scalar>, num: LinearCombination<Scalar, NumSplits>) -> Self {
     Self { value, num }
   }
   pub fn alloc<CS, F>(mut cs: CS, value: F) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Result<Scalar, SynthesisError>,
   {
     let mut new_value = None;
@@ -93,7 +93,7 @@ impl<Scalar: PrimeField> Num<Scalar> {
     })
   }
 
-  pub fn fits_in_bits<CS: ConstraintSystem<Scalar>>(
+  pub fn fits_in_bits<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     n_bits: usize,
@@ -155,7 +155,7 @@ impl<Scalar: PrimeField> Num<Scalar> {
 
   /// Computes the natural number represented by an array of bits.
   /// Checks if the natural number equals `self`
-  pub fn is_equal<CS: ConstraintSystem<Scalar>>(&self, mut cs: CS, other: &Bitvector<Scalar>) {
+  pub fn is_equal<CS: ConstraintSystem<Scalar, NumSplits>>(&self, mut cs: CS, other: &Bitvector<Scalar, NumSplits>) {
     let allocations = other.allocations.clone();
     let mut f = Scalar::ONE;
     let sum = allocations
@@ -172,16 +172,16 @@ impl<Scalar: PrimeField> Num<Scalar> {
   /// Compute the natural number represented by an array of limbs.
   /// The limbs are assumed to be based the `limb_width` power of 2.
   /// Low-index bits are low-order
-  pub fn decompose<CS: ConstraintSystem<Scalar>>(
+  pub fn decompose<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     n_bits: usize,
-  ) -> Result<Bitvector<Scalar>, SynthesisError> {
+  ) -> Result<Bitvector<Scalar, NumSplits>, SynthesisError> {
     let values: Option<Vec<bool>> = self.value.as_ref().map(|v| {
       let num = *v;
       (0..n_bits).map(|i| num.get_bit(i).unwrap()).collect()
     });
-    let allocations: Vec<Bit<Scalar>> = (0..n_bits)
+    let allocations: Vec<Bit<Scalar, NumSplits>> = (0..n_bits)
       .map(|bit_i| {
         Bit::alloc(
           cs.namespace(|| format!("bit{bit_i}")),
@@ -199,7 +199,7 @@ impl<Scalar: PrimeField> Num<Scalar> {
       });
     let sum_lc = LinearCombination::zero() + &self.num - &sum;
     cs.enforce(|| "sum", |lc| lc + &sum_lc, |lc| lc + CS::one(), |lc| lc);
-    let bits: Vec<LinearCombination<Scalar>> = allocations
+    let bits: Vec<LinearCombination<Scalar, NumSplits>> = allocations
       .clone()
       .into_iter()
       .map(|a| LinearCombination::zero() + &a.bit)
@@ -211,10 +211,10 @@ impl<Scalar: PrimeField> Num<Scalar> {
     })
   }
 
-  pub fn as_allocated_num<CS: ConstraintSystem<Scalar>>(
+  pub fn as_allocated_num<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
-  ) -> Result<AllocatedNum<Scalar>, SynthesisError> {
+  ) -> Result<AllocatedNum<Scalar, NumSplits>, SynthesisError> {
     let new = AllocatedNum::alloc(cs.namespace(|| "alloc"), || Ok(*self.value.grab()?))?;
     cs.enforce(
       || "eq",
@@ -226,8 +226,8 @@ impl<Scalar: PrimeField> Num<Scalar> {
   }
 }
 
-impl<Scalar: PrimeField> From<AllocatedNum<Scalar>> for Num<Scalar> {
-  fn from(a: AllocatedNum<Scalar>) -> Self {
+impl<Scalar: PrimeField, const NumSplits: usize> From<AllocatedNum<Scalar, NumSplits>> for Num<Scalar, NumSplits> {
+  fn from(a: AllocatedNum<Scalar, NumSplits>) -> Self {
     Self::new(a.get_value(), LinearCombination::zero() + a.get_variable())
   }
 }

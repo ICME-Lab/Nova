@@ -7,21 +7,22 @@ use crate::{
 use ff::PrimeField;
 
 /// `ShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
-pub struct ShapeCS<E: Engine>
+pub struct ShapeCS<E: Engine, const NumSplits: usize>
 where
   E::Scalar: PrimeField,
 {
   /// All constraints added to the `ShapeCS`.
   pub constraints: Vec<(
-    LinearCombination<E::Scalar>,
-    LinearCombination<E::Scalar>,
-    LinearCombination<E::Scalar>,
+    LinearCombination<E::Scalar, NumSplits>,
+    LinearCombination<E::Scalar, NumSplits>,
+    LinearCombination<E::Scalar, NumSplits>,
   )>,
   inputs: usize,
   aux: usize,
+  precommitted: [usize; NumSplits],
 }
 
-impl<E: Engine> ShapeCS<E> {
+impl<E: Engine, const NumSplits: usize> ShapeCS<E, NumSplits> {
   /// Create a new, default `ShapeCS`,
   pub fn new() -> Self {
     ShapeCS::default()
@@ -41,19 +42,25 @@ impl<E: Engine> ShapeCS<E> {
   pub fn num_aux(&self) -> usize {
     self.aux
   }
+
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> [usize; NumSplits] {
+    self.precommitted
+  }
 }
 
-impl<E: Engine> Default for ShapeCS<E> {
+impl<E: Engine, const NumSplits: usize> Default for ShapeCS<E, NumSplits> {
   fn default() -> Self {
     ShapeCS {
       constraints: vec![],
       inputs: 1,
       aux: 0,
+      precommitted: [0; NumSplits],
     }
   }
 }
 
-impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
+impl<E: Engine, const NumSplits: usize> ConstraintSystem<E::Scalar, NumSplits> for ShapeCS<E, NumSplits> {
   type Root = Self;
 
   fn alloc<F, A, AR>(&mut self, _annotation: A, _f: F) -> Result<Variable, SynthesisError>
@@ -78,13 +85,24 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     Ok(Variable::new_unchecked(Index::Input(self.inputs - 1)))
   }
 
+  fn alloc_precommitted<F, A, AR>(&mut self, _annotation: A, _f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.precommitted[idx] += 1;
+
+    Ok(Variable::new_unchecked(Index::Precommitted((idx, self.precommitted[idx] - 1))))
+  }
+
   fn enforce<A, AR, LA, LB, LC>(&mut self, _annotation: A, a: LA, b: LB, c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<E::Scalar>) -> LinearCombination<E::Scalar>,
-    LB: FnOnce(LinearCombination<E::Scalar>) -> LinearCombination<E::Scalar>,
-    LC: FnOnce(LinearCombination<E::Scalar>) -> LinearCombination<E::Scalar>,
+    LA: FnOnce(LinearCombination<E::Scalar, NumSplits>) -> LinearCombination<E::Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<E::Scalar, NumSplits>) -> LinearCombination<E::Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<E::Scalar, NumSplits>) -> LinearCombination<E::Scalar, NumSplits>,
   {
     let a = a(LinearCombination::zero());
     let b = b(LinearCombination::zero());

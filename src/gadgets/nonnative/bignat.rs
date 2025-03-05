@@ -80,9 +80,9 @@ impl BigNatParams {
 
 /// A representation of a large natural number (a member of {0, 1, 2, ... })
 #[derive(Clone)]
-pub struct BigNat<Scalar: PrimeField> {
+pub struct BigNat<Scalar: PrimeField, const NumSplits: usize> {
   /// The linear combinations which constrain the value of each limb of the number
-  pub limbs: Vec<LinearCombination<Scalar>>,
+  pub limbs: Vec<LinearCombination<Scalar, NumSplits>>,
   /// The witness values for each limb (filled at witness-time)
   pub limb_values: Option<Vec<Scalar>>,
   /// The value of the whole number (filled at witness-time)
@@ -91,15 +91,15 @@ pub struct BigNat<Scalar: PrimeField> {
   pub params: BigNatParams,
 }
 
-impl<Scalar: PrimeField> PartialEq for BigNat<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> PartialEq for BigNat<Scalar, NumSplits> {
   fn eq(&self, other: &Self) -> bool {
     self.value == other.value && self.params == other.params
   }
 }
-impl<Scalar: PrimeField> Eq for BigNat<Scalar> {}
+impl<Scalar: PrimeField, const NumSplits: usize> Eq for BigNat<Scalar, NumSplits> {}
 
-impl<Scalar: PrimeField> From<BigNat<Scalar>> for Polynomial<Scalar> {
-  fn from(other: BigNat<Scalar>) -> Polynomial<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> From<BigNat<Scalar, NumSplits>> for Polynomial<Scalar, NumSplits> {
+  fn from(other: BigNat<Scalar, NumSplits>) -> Polynomial<Scalar, NumSplits> {
     Polynomial {
       coefficients: other.limbs,
       values: other.limb_values,
@@ -107,7 +107,7 @@ impl<Scalar: PrimeField> From<BigNat<Scalar>> for Polynomial<Scalar> {
   }
 }
 
-impl<Scalar: PrimeField> BigNat<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> BigNat<Scalar, NumSplits> {
   /// Allocates a `BigNat` in the circuit with `n_limbs` limbs of width `limb_width` each.
   /// If `max_word` is missing, then it is assumed to be `(2 << limb_width) - 1`.
   /// The value is provided by a closure returning limb values.
@@ -119,7 +119,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     n_limbs: usize,
   ) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Result<Vec<Scalar>, SynthesisError>,
   {
     let values_cell = f();
@@ -176,7 +176,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     n_limbs: usize,
   ) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Result<BigInt, SynthesisError>,
   {
     let all_values_cell =
@@ -220,9 +220,9 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   /// Allocates a `BigNat` in the circuit with `n_limbs` limbs of width `limb_width` each.
   /// The `max_word` is guaranteed to be `(2 << limb_width) - 1`.
   /// The value is provided by an allocated number
-  pub fn from_num<CS: ConstraintSystem<Scalar>>(
+  pub fn from_num<CS: ConstraintSystem<Scalar, NumSplits>>(
     mut cs: CS,
-    n: &Num<Scalar>,
+    n: &Num<Scalar, NumSplits>,
     limb_width: usize,
     n_limbs: usize,
   ) -> Result<Self, SynthesisError> {
@@ -249,7 +249,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     Ok(bignat)
   }
 
-  pub fn as_limbs(&self) -> Vec<Num<Scalar>> {
+  pub fn as_limbs(&self) -> Vec<Num<Scalar, NumSplits>> {
     let mut limbs = Vec::new();
     for (i, lc) in self.limbs.iter().enumerate() {
       limbs.push(Num::new(
@@ -260,7 +260,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     limbs
   }
 
-  pub fn assert_well_formed<CS: ConstraintSystem<Scalar>>(
+  pub fn assert_well_formed<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
   ) -> Result<(), SynthesisError> {
@@ -275,13 +275,13 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Break `self` up into a bit-vector.
-  pub fn decompose<CS: ConstraintSystem<Scalar>>(
+  pub fn decompose<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
-  ) -> Result<Bitvector<Scalar>, SynthesisError> {
+  ) -> Result<Bitvector<Scalar, NumSplits>, SynthesisError> {
     let limb_values_split =
       (0..self.limbs.len()).map(|i| self.limb_values.as_ref().map(|vs| vs[i]));
-    let bitvectors: Vec<Bitvector<Scalar>> = self
+    let bitvectors: Vec<Bitvector<Scalar, NumSplits>> = self
       .limbs
       .iter()
       .zip(limb_values_split)
@@ -331,7 +331,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     }
   }
 
-  pub fn from_poly(poly: Polynomial<Scalar>, limb_width: usize, max_word: BigInt) -> Self {
+  pub fn from_poly(poly: Polynomial<Scalar, NumSplits>, limb_width: usize, max_word: BigInt) -> Self {
     Self {
       params: BigNatParams {
         min_bits: 0,
@@ -349,7 +349,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Constrain `self` to be equal to `other`, after carrying both.
-  pub fn equal_when_carried<CS: ConstraintSystem<Scalar>>(
+  pub fn equal_when_carried<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     other: &Self,
@@ -433,7 +433,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   /// Constrain `self` to be equal to `other`, after carrying both.
   /// Uses regrouping internally to take full advantage of the field size and reduce the amount
   /// of carrying.
-  pub fn equal_when_carried_regroup<CS: ConstraintSystem<Scalar>>(
+  pub fn equal_when_carried_regroup<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     other: &Self,
@@ -449,11 +449,11 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     self_grouped.equal_when_carried(cs.namespace(|| "grouped"), &other_grouped)
   }
 
-  pub fn add(&self, other: &Self) -> Result<BigNat<Scalar>, SynthesisError> {
+  pub fn add(&self, other: &Self) -> Result<BigNat<Scalar, NumSplits>, SynthesisError> {
     self.enforce_limb_width_agreement(other, "add")?;
     let n_limbs = max(self.params.n_limbs, other.params.n_limbs);
     let max_word = &self.params.max_word + &other.params.max_word;
-    let limbs: Vec<LinearCombination<Scalar>> = (0..n_limbs)
+    let limbs: Vec<LinearCombination<Scalar, NumSplits>> = (0..n_limbs)
       .map(|i| match (self.limbs.get(i), other.limbs.get(i)) {
         (Some(a), Some(b)) => a.clone() + b,
         (Some(a), None) => a.clone(),
@@ -494,12 +494,12 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Compute a `BigNat` constrained to be equal to `self * other % modulus`.
-  pub fn mult_mod<CS: ConstraintSystem<Scalar>>(
+  pub fn mult_mod<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     other: &Self,
     modulus: &Self,
-  ) -> Result<(BigNat<Scalar>, BigNat<Scalar>), SynthesisError> {
+  ) -> Result<(BigNat<Scalar, NumSplits>, BigNat<Scalar, NumSplits>), SynthesisError> {
     self.enforce_limb_width_agreement(other, "mult_mod")?;
     let limb_width = self.params.limb_width;
     let quotient_bits = (self.n_bits() + other.n_bits()).saturating_sub(modulus.params.min_bits);
@@ -565,11 +565,11 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Compute a `BigNat` constrained to be equal to `self * other % modulus`.
-  pub fn red_mod<CS: ConstraintSystem<Scalar>>(
+  pub fn red_mod<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     modulus: &Self,
-  ) -> Result<BigNat<Scalar>, SynthesisError> {
+  ) -> Result<BigNat<Scalar, NumSplits>, SynthesisError> {
     self.enforce_limb_width_agreement(modulus, "red_mod")?;
     let limb_width = self.params.limb_width;
     let quotient_bits = self.n_bits().saturating_sub(modulus.params.min_bits);
@@ -610,7 +610,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Combines limbs into groups.
-  pub fn group_limbs(&self, limbs_per_group: usize) -> BigNat<Scalar> {
+  pub fn group_limbs(&self, limbs_per_group: usize) -> BigNat<Scalar, NumSplits> {
     let n_groups = (self.limbs.len() - 1) / limbs_per_group + 1;
     let limb_values = self.limb_values.as_ref().map(|vs| {
       let mut values: Vec<Scalar> = vec![Scalar::ZERO; n_groups];
@@ -631,7 +631,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
       values
     });
     let limbs = {
-      let mut limbs: Vec<LinearCombination<Scalar>> = vec![LinearCombination::zero(); n_groups];
+      let mut limbs: Vec<LinearCombination<Scalar, NumSplits>> = vec![LinearCombination::zero(); n_groups];
       let mut shift = Scalar::ONE;
       let limb_block = (0..self.params.limb_width).fold(Scalar::ONE, |mut l, _| {
         l = l.double();
@@ -671,17 +671,17 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 }
 
-pub struct Polynomial<Scalar: PrimeField> {
-  pub coefficients: Vec<LinearCombination<Scalar>>,
+pub struct Polynomial<Scalar: PrimeField, const NumSplits: usize> {
+  pub coefficients: Vec<LinearCombination<Scalar, NumSplits>>,
   pub values: Option<Vec<Scalar>>,
 }
 
-impl<Scalar: PrimeField> Polynomial<Scalar> {
-  pub fn alloc_product<CS: ConstraintSystem<Scalar>>(
+impl<Scalar: PrimeField, const NumSplits: usize> Polynomial<Scalar, NumSplits> {
+  pub fn alloc_product<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
     other: &Self,
-  ) -> Result<Polynomial<Scalar>, SynthesisError> {
+  ) -> Result<Polynomial<Scalar, NumSplits>, SynthesisError> {
     let n_product_coeffs = self.coefficients.len() + other.coefficients.len() - 1;
     let values = self.values.as_ref().and_then(|self_vs| {
       other.values.as_ref().map(|other_vs| {
@@ -702,7 +702,7 @@ impl<Scalar: PrimeField> Polynomial<Scalar> {
       .map(|i| {
         Ok(LinearCombination::zero() + cs.alloc(|| format!("prod {i}"), || Ok(values.grab()?[i]))?)
       })
-      .collect::<Result<Vec<LinearCombination<Scalar>>, SynthesisError>>()?;
+      .collect::<Result<Vec<LinearCombination<Scalar, NumSplits>>, SynthesisError>>()?;
     let product = Polynomial {
       coefficients,
       values,
@@ -794,7 +794,7 @@ mod tests {
   }
 
   impl<Scalar: PrimeField> Circuit<Scalar> for PolynomialMultiplier<Scalar> {
-    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+    fn synthesize<CS: ConstraintSystem<Scalar, NumSplits>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
       let a = Polynomial {
         coefficients: self
           .a
@@ -803,7 +803,7 @@ mod tests {
           .map(|(i, x)| {
             Ok(LinearCombination::zero() + cs.alloc(|| format!("coeff_a {i}"), || Ok(*x))?)
           })
-          .collect::<Result<Vec<LinearCombination<Scalar>>, SynthesisError>>()?,
+          .collect::<Result<Vec<LinearCombination<Scalar, NumSplits>>, SynthesisError>>()?,
         values: Some(self.a),
       };
       let b = Polynomial {
@@ -814,7 +814,7 @@ mod tests {
           .map(|(i, x)| {
             Ok(LinearCombination::zero() + cs.alloc(|| format!("coeff_b {i}"), || Ok(*x))?)
           })
-          .collect::<Result<Vec<LinearCombination<Scalar>>, SynthesisError>>()?,
+          .collect::<Result<Vec<LinearCombination<Scalar, NumSplits>>, SynthesisError>>()?,
         values: Some(self.b),
       };
       let _prod = a.alloc_product(cs.namespace(|| "product"), &b)?;
@@ -854,7 +854,7 @@ mod tests {
   }
 
   impl<Scalar: PrimeField> Circuit<Scalar> for BigNatBitDecomp {
-    fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+    fn synthesize<CS: ConstraintSystem<Scalar, NumSplits>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
       let n = BigNat::alloc_from_nat(
         cs.namespace(|| "n"),
         || Ok(self.inputs.grab()?.n.clone()),

@@ -20,9 +20,9 @@ pub struct TestConstraintSystem<Scalar: PrimeField> {
   current_namespace: Vec<String>,
   #[allow(clippy::type_complexity)]
   constraints: Vec<(
-    LinearCombination<Scalar>,
-    LinearCombination<Scalar>,
-    LinearCombination<Scalar>,
+    LinearCombination<Scalar, NumSplits>,
+    LinearCombination<Scalar, NumSplits>,
+    LinearCombination<Scalar, NumSplits>,
     String,
   )>,
   inputs: Vec<(Scalar, String)>,
@@ -30,7 +30,7 @@ pub struct TestConstraintSystem<Scalar: PrimeField> {
 }
 
 fn _eval_lc2<Scalar: PrimeField>(
-  terms: &LinearCombination<Scalar>,
+  terms: &LinearCombination<Scalar, NumSplits>,
   inputs: &[Scalar],
   aux: &[Scalar],
 ) -> Scalar {
@@ -50,7 +50,7 @@ fn _eval_lc2<Scalar: PrimeField>(
 }
 
 fn eval_lc<Scalar: PrimeField>(
-  terms: &LinearCombination<Scalar>,
+  terms: &LinearCombination<Scalar, NumSplits>,
   inputs: &[(Scalar, String)],
   aux: &[(Scalar, String)],
 ) -> Scalar {
@@ -69,7 +69,7 @@ fn eval_lc<Scalar: PrimeField>(
   acc
 }
 
-impl<Scalar: PrimeField> Default for TestConstraintSystem<Scalar> {
+impl<Scalar: PrimeField> Default for TestConstraintSystem<Scalar, NumSplits> {
   fn default() -> Self {
     let mut map = HashMap::new();
     map.insert("ONE".into(), NamedObject::Var);
@@ -84,7 +84,7 @@ impl<Scalar: PrimeField> Default for TestConstraintSystem<Scalar> {
   }
 }
 
-impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
+impl<Scalar: PrimeField> TestConstraintSystem<Scalar, NumSplits> {
   /// Create a new test constraint system.
   pub fn new() -> Self {
     Default::default()
@@ -143,7 +143,7 @@ fn compute_path(ns: &[String], this: &str) -> String {
   format!("{}/{}", name, this)
 }
 
-impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scalar> {
+impl<Scalar: PrimeField> ConstraintSystem<Scalar, NumSplits> for TestConstraintSystem<Scalar, NumSplits> {
   type Root = Self;
 
   fn alloc<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
@@ -180,9 +180,9 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+    LA: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
   {
     let path = compute_path(&self.current_namespace, &annotation().into());
     self.set_named_obj(path.clone(), NamedObject::Constraint);

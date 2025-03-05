@@ -29,100 +29,107 @@ use serde::{Deserialize, Serialize};
 
 /// An implementation of Nova traits with HyperKZG over the BN256 curve
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Bn256EngineKZG;
+pub struct Bn256EngineKZG<const NumSplits: usize>;
 
 /// An implementation of the Nova `Engine` trait with Grumpkin curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct GrumpkinEngine;
+pub struct GrumpkinEngine<const NumSplits: usize>;
 
 /// An implementation of the Nova `Engine` trait with BN254 curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Bn256EngineIPA;
+pub struct Bn256EngineIPA<const NumSplits: usize>;
 
-impl Engine for Bn256EngineKZG {
+impl<const NumSplits: usize> Engine for Bn256EngineKZG<NumSplits> {
   type Base = bn256::Base;
   type Scalar = bn256::Scalar;
   type GE = bn256::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = HyperKZGCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
-impl Engine for Bn256EngineIPA {
+impl<const NumSplits: usize> Engine for Bn256EngineIPA<NumSplits> {
   type Base = bn256::Base;
   type Scalar = bn256::Scalar;
   type GE = bn256::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
-impl Engine for GrumpkinEngine {
+impl<const NumSplits: usize> Engine for GrumpkinEngine<NumSplits> {
   type Base = grumpkin::Base;
   type Scalar = grumpkin::Scalar;
   type GE = grumpkin::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
 /// An implementation of the Nova `Engine` trait with Secp256k1 curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Secp256k1Engine;
+pub struct Secp256k1Engine<const NumSplits: usize>;
 
 /// An implementation of the Nova `Engine` trait with Secp256k1 curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Secq256k1Engine;
+pub struct Secq256k1Engine<const NumSplits: usize>;
 
-impl Engine for Secp256k1Engine {
+impl<const NumSplits: usize> Engine for Secp256k1Engine<NumSplits> {
   type Base = secp256k1::Base;
   type Scalar = secp256k1::Scalar;
   type GE = secp256k1::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
-impl Engine for Secq256k1Engine {
+impl<const NumSplits: usize> Engine for Secq256k1Engine<NumSplits> {
   type Base = secq256k1::Base;
   type Scalar = secq256k1::Scalar;
   type GE = secq256k1::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
 /// An implementation of the Nova `Engine` trait with Pallas curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct PallasEngine;
+pub struct PallasEngine<const NumSplits: usize>;
 
 /// An implementation of the Nova `Engine` trait with Vesta curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct VestaEngine;
+pub struct VestaEngine<const NumSplits: usize>;
 
-impl Engine for PallasEngine {
+impl<const NumSplits: usize> Engine for PallasEngine<NumSplits> {
   type Base = pallas::Base;
   type Scalar = pallas::Scalar;
   type GE = pallas::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
-impl Engine for VestaEngine {
+impl<const NumSplits: usize> Engine for VestaEngine<NumSplits> {
   type Base = vesta::Base;
   type Scalar = vesta::Scalar;
   type GE = vesta::Point;
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
+  type ROCircuit = PoseidonROCircuit<Self::Base, NumSplits>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
+  const NUM_SPLITS: usize = NumSplits;
 }
 
 #[cfg(test)]

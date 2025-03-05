@@ -20,15 +20,15 @@ use ff::Field;
 
 /// An Allocated R1CS Instance
 #[derive(Clone)]
-pub struct AllocatedR1CSInstance<E: Engine> {
-  pub(crate) W: AllocatedPoint<E>,
-  pub(crate) X0: AllocatedNum<E::Base>,
-  pub(crate) X1: AllocatedNum<E::Base>,
+pub struct AllocatedR1CSInstance<E: Engine, const NumSplits: usize> {
+  pub(crate) W: AllocatedPoint<E, NumSplits>,
+  pub(crate) X0: AllocatedNum<E::Base, NumSplits>,
+  pub(crate) X1: AllocatedNum<E::Base, NumSplits>,
 }
 
-impl<E: Engine> AllocatedR1CSInstance<E> {
+impl<E: Engine, const NumSplits: usize> AllocatedR1CSInstance<E, NumSplits> {
   /// Takes the r1cs instance and creates a new allocated r1cs instance
-  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     mut cs: CS,
     u: Option<&R1CSInstance<E>>,
   ) -> Result<Self, SynthesisError> {
@@ -38,8 +38,8 @@ impl<E: Engine> AllocatedR1CSInstance<E> {
     )?;
     W.check_on_curve(cs.namespace(|| "check W on curve"))?;
 
-    let X0 = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate X[0]"), u.map(|u| u.X[0]))?;
-    let X1 = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate X[1]"), u.map(|u| u.X[1]))?;
+    let X0 = alloc_scalar_as_base::<E, NumSplits, _>(cs.namespace(|| "allocate X[0]"), u.map(|u| u.X[0]))?;
+    let X1 = alloc_scalar_as_base::<E, NumSplits, _>(cs.namespace(|| "allocate X[1]"), u.map(|u| u.X[1]))?;
 
     Ok(AllocatedR1CSInstance { W, X0, X1 })
   }
@@ -55,17 +55,17 @@ impl<E: Engine> AllocatedR1CSInstance<E> {
 }
 
 /// An Allocated Relaxed R1CS Instance
-pub struct AllocatedRelaxedR1CSInstance<E: Engine> {
-  pub(crate) W: AllocatedPoint<E>,
-  pub(crate) E: AllocatedPoint<E>,
-  pub(crate) u: AllocatedNum<E::Base>,
-  pub(crate) X0: BigNat<E::Base>,
-  pub(crate) X1: BigNat<E::Base>,
+pub struct AllocatedRelaxedR1CSInstance<E: Engine, const NumSplits: usize> {
+  pub(crate) W: AllocatedPoint<E, NumSplits>,
+  pub(crate) E: AllocatedPoint<E, NumSplits>,
+  pub(crate) u: AllocatedNum<E::Base, NumSplits>,
+  pub(crate) X0: BigNat<E::Base, NumSplits>,
+  pub(crate) X1: BigNat<E::Base, NumSplits>,
 }
 
-impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
+impl<E: Engine, const NumSplits: usize> AllocatedRelaxedR1CSInstance<E, NumSplits> {
   /// Allocates the given `RelaxedR1CSInstance` as a witness of the circuit
-  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     mut cs: CS,
     inst: Option<&RelaxedR1CSInstance<E>>,
     limb_width: usize,
@@ -86,7 +86,7 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
 
     // u << |E::Base| despite the fact that u is a scalar.
     // So we parse all of its bytes as a E::Base element
-    let u = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate u"), inst.map(|inst| inst.u))?;
+    let u = alloc_scalar_as_base::<E, NumSplits, _>(cs.namespace(|| "allocate u"), inst.map(|inst| inst.u))?;
 
     // Allocate X0 and X1. If the input instance is None, then allocate default values 0.
     let X0 = BigNat::alloc_from_nat(
@@ -108,7 +108,7 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
 
   /// Allocates the hardcoded default `RelaxedR1CSInstance` in the circuit.
   /// W = E = 0, u = 0, X0 = X1 = 0
-  pub fn default<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn default<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     mut cs: CS,
     limb_width: usize,
     n_limbs: usize,
@@ -140,9 +140,9 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
 
   /// Allocates the R1CS Instance as a `RelaxedR1CSInstance` in the circuit.
   /// E = 0, u = 1
-  pub fn from_r1cs_instance<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn from_r1cs_instance<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     mut cs: CS,
-    inst: AllocatedR1CSInstance<E>,
+    inst: AllocatedR1CSInstance<E, NumSplits>,
     limb_width: usize,
     n_limbs: usize,
   ) -> Result<Self, SynthesisError> {
@@ -174,7 +174,7 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
   }
 
   /// Absorb the provided instance in the RO
-  pub fn absorb_in_ro<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn absorb_in_ro<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     &self,
     mut cs: CS,
     ro: &mut E::ROCircuit,
@@ -196,7 +196,7 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       .map(|(i, limb)| {
         limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of X_r[0] to num")))
       })
-      .collect::<Result<Vec<AllocatedNum<E::Base>>, _>>()?;
+      .collect::<Result<Vec<AllocatedNum<E::Base, NumSplits>>, _>>()?;
 
     // absorb each of the limbs of X[0]
     for limb in X0_bn {
@@ -212,7 +212,7 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       .map(|(i, limb)| {
         limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of X_r[1] to num")))
       })
-      .collect::<Result<Vec<AllocatedNum<E::Base>>, _>>()?;
+      .collect::<Result<Vec<AllocatedNum<E::Base, NumSplits>>, _>>()?;
 
     // absorb each of the limbs of X[1]
     for limb in X1_bn {
@@ -223,16 +223,16 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
   }
 
   /// Folds self with a relaxed r1cs instance and returns the result
-  pub fn fold_with_r1cs<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn fold_with_r1cs<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     &self,
     mut cs: CS,
-    params: &AllocatedNum<E::Base>, // hash of R1CSShape of F'
-    u: &AllocatedR1CSInstance<E>,
-    T: &AllocatedPoint<E>,
+    params: &AllocatedNum<E::Base, NumSplits>, // hash of R1CSShape of F'
+    u: &AllocatedR1CSInstance<E, NumSplits>,
+    T: &AllocatedPoint<E, NumSplits>,
     ro_consts: ROConstantsCircuit<E>,
     limb_width: usize,
     n_limbs: usize,
-  ) -> Result<AllocatedRelaxedR1CSInstance<E>, SynthesisError> {
+  ) -> Result<AllocatedRelaxedR1CSInstance<E, NumSplits>, SynthesisError> {
     // Compute r:
     let mut ro = E::ROCircuit::new(ro_consts);
     ro.absorb(params);
@@ -322,12 +322,12 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
   }
 
   /// If the condition is true then returns this otherwise it returns the other
-  pub fn conditionally_select<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn conditionally_select<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     &self,
     mut cs: CS,
-    other: &AllocatedRelaxedR1CSInstance<E>,
+    other: &AllocatedRelaxedR1CSInstance<E, NumSplits>,
     condition: &Boolean,
-  ) -> Result<AllocatedRelaxedR1CSInstance<E>, SynthesisError> {
+  ) -> Result<AllocatedRelaxedR1CSInstance<E, NumSplits>, SynthesisError> {
     let W = AllocatedPoint::conditionally_select(
       cs.namespace(|| "W = cond ? self.W : other.W"),
       &self.W,

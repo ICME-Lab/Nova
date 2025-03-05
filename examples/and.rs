@@ -63,7 +63,7 @@ impl<G: Group> AndCircuit<G> {
   }
 }
 
-pub fn u64_into_bit_vec_le<Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
+pub fn u64_into_bit_vec_le<Scalar: PrimeField, CS: ConstraintSystem<Scalar, NumSplits>>(
   mut cs: CS,
   value: Option<u64>,
 ) -> Result<Vec<AllocatedBit>, SynthesisError> {
@@ -96,7 +96,7 @@ pub fn le_bits_to_num<Scalar, CS>(
 ) -> Result<AllocatedNum<Scalar>, SynthesisError>
 where
   Scalar: PrimeField + PrimeFieldBits,
-  CS: ConstraintSystem<Scalar>,
+  CS: ConstraintSystem<Scalar, NumSplits>,
 {
   // We loop over the input bits and construct the constraint
   // and the field element that corresponds to the result

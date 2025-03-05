@@ -9,12 +9,12 @@ use crate::frontend::gadgets::boolean::{self, AllocatedBit, Boolean};
 
 /// Represents an allocated number in the circuit.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AllocatedNum<Scalar: PrimeField> {
+pub struct AllocatedNum<Scalar: PrimeField, const NumSplits: usize> {
   value: Option<Scalar>,
   variable: Variable,
 }
 
-impl<Scalar: PrimeField> Clone for AllocatedNum<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> Clone for AllocatedNum<Scalar, NumSplits> {
   fn clone(&self) -> Self {
     AllocatedNum {
       value: self.value,
@@ -23,11 +23,11 @@ impl<Scalar: PrimeField> Clone for AllocatedNum<Scalar> {
   }
 }
 
-impl<Scalar: PrimeField> AllocatedNum<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> AllocatedNum<Scalar, NumSplits> {
   /// Allocate a `Variable(Aux)` in a `ConstraintSystem`.
   pub fn alloc<CS, F>(mut cs: CS, value: F) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Result<Scalar, SynthesisError>,
   {
     let mut new_value = None;
@@ -52,7 +52,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// infallible getter for the value.
   pub fn alloc_infallible<CS, F>(cs: CS, value: F) -> Self
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Scalar,
   {
     Self::alloc(cs, || Ok(value())).unwrap()
@@ -61,7 +61,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// Allocate a `Variable(Input)` in a `ConstraintSystem`.
   pub fn alloc_input<CS, F>(mut cs: CS, value: F) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Result<Scalar, SynthesisError>,
   {
     let mut new_value = None;
@@ -88,7 +88,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// which may or may not be public inputs.
   pub fn alloc_maybe_input<CS, F>(cs: CS, is_input: bool, value: F) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: FnOnce() -> Result<Scalar, SynthesisError>,
   {
     if is_input {
@@ -101,7 +101,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// Make [`AllocatedNum`] a public input.
   pub fn inputize<CS>(&self, mut cs: CS) -> Result<(), SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let input = cs.alloc_input(
       || "input variable",
@@ -125,16 +125,16 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// congruency is not allowed.)
   pub fn to_bits_le_strict<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     Scalar: PrimeFieldBits,
   {
-    pub fn kary_and<Scalar, CS>(
+    pub fn kary_and<Scalar, const NumSplits: usize, CS>(
       mut cs: CS,
       v: &[AllocatedBit],
     ) -> Result<AllocatedBit, SynthesisError>
     where
       Scalar: PrimeField,
-      CS: ConstraintSystem<Scalar>,
+      CS: ConstraintSystem<Scalar, NumSplits>,
     {
       assert!(!v.is_empty());
 
@@ -253,7 +253,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// "in the field."
   pub fn to_bits_le<CS>(&self, mut cs: CS) -> Result<Vec<Boolean>, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     Scalar: PrimeFieldBits,
   {
     let bits = boolean::field_into_allocated_bits_le(&mut cs, self.value)?;
@@ -277,7 +277,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// Adds two allocated numbers together, returning a new allocated number.
   pub fn add<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut value = None;
 
@@ -310,7 +310,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// Multiplies two allocated numbers together, returning a new allocated number.
   pub fn mul<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut value = None;
 
@@ -343,7 +343,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// Squares an allocated number, returning a new allocated number.
   pub fn square<CS>(&self, mut cs: CS) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut value = None;
 
@@ -376,7 +376,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   /// Asserts that the allocated number is not zero.
   pub fn assert_nonzero<CS>(&self, mut cs: CS) -> Result<(), SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let inv = cs.alloc(
       || "ephemeral inverse",
@@ -414,7 +414,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
     condition: &Boolean,
   ) -> Result<(Self, Self), SynthesisError>
   where
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let c = Self::alloc(cs.namespace(|| "conditional reversal result 1"), || {
       if condition
@@ -468,21 +468,21 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
 
 /// Represents a number in the circuit using a linear combination.
 #[derive(Debug, Clone)]
-pub struct Num<Scalar: PrimeField> {
+pub struct Num<Scalar: PrimeField, const NumSplits: usize> {
   value: Option<Scalar>,
-  lc: LinearCombination<Scalar>,
+  lc: LinearCombination<Scalar, NumSplits>,
 }
 
-impl<Scalar: PrimeField> From<AllocatedNum<Scalar>> for Num<Scalar> {
-  fn from(num: AllocatedNum<Scalar>) -> Num<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> From<AllocatedNum<Scalar, NumSplits>> for Num<Scalar, NumSplits> {
+  fn from(num: AllocatedNum<Scalar, NumSplits>) -> Num<Scalar, NumSplits> {
     Num {
       value: num.value,
-      lc: LinearCombination::<Scalar>::from_variable(num.variable),
+      lc: LinearCombination::<Scalar, NumSplits>::from_variable(num.variable),
     }
   }
 }
 
-impl<Scalar: PrimeField> Num<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> Num<Scalar, NumSplits> {
   /// Create a zero [`Num`].
   pub fn zero() -> Self {
     Num {
@@ -497,7 +497,7 @@ impl<Scalar: PrimeField> Num<Scalar> {
   }
 
   /// Get the inner [`LinearCombination`] of the [`Num`].
-  pub fn lc(&self, coeff: Scalar) -> LinearCombination<Scalar> {
+  pub fn lc(&self, coeff: Scalar) -> LinearCombination<Scalar, NumSplits> {
     LinearCombination::zero() + (coeff, &self.lc)
   }
 

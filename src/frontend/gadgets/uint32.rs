@@ -113,7 +113,7 @@ impl UInt32 {
     }
   }
 
-  fn triop<Scalar, CS, F, U>(
+  fn triop<Scalar, const NumSplits: usize, CS, F, U>(
     mut cs: CS,
     a: &Self,
     b: &Self,
@@ -123,7 +123,7 @@ impl UInt32 {
   ) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
     F: Fn(u32, u32, u32) -> u32,
     U: Fn(&mut CS, usize, &Boolean, &Boolean, &Boolean) -> Result<Boolean, SynthesisError>,
   {
@@ -149,7 +149,7 @@ impl UInt32 {
 
   /// Compute the `maj` value (a and b) xor (a and c) xor (b and c)
   /// during SHA256.
-  pub fn sha256_maj<Scalar, CS>(
+  pub fn sha256_maj<Scalar, const NumSplits: usize, CS>(
     cs: CS,
     a: &Self,
     b: &Self,
@@ -157,7 +157,7 @@ impl UInt32 {
   ) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     Self::triop(
       cs,
@@ -171,10 +171,10 @@ impl UInt32 {
 
   /// Compute the `ch` value `(a and b) xor ((not a) and c)`
   /// during SHA256.
-  pub fn sha256_ch<Scalar, CS>(cs: CS, a: &Self, b: &Self, c: &Self) -> Result<Self, SynthesisError>
+  pub fn sha256_ch<Scalar, const NumSplits: usize, CS>(cs: CS, a: &Self, b: &Self, c: &Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     Self::triop(
       cs,
@@ -187,10 +187,10 @@ impl UInt32 {
   }
 
   /// XOR this `UInt32` with another `UInt32`
-  pub fn xor<Scalar, CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
+  pub fn xor<Scalar, const NumSplits: usize, CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let new_value = match (self.value, other.value) {
       (Some(a), Some(b)) => Some(a ^ b),
@@ -213,11 +213,11 @@ impl UInt32 {
 
   /// Perform modular addition of several `UInt32` objects.
   #[allow(clippy::unnecessary_unwrap)]
-  pub fn addmany<Scalar, CS, M>(mut cs: M, operands: &[Self]) -> Result<Self, SynthesisError>
+  pub fn addmany<Scalar, const NumSplits: usize, CS, M>(mut cs: M, operands: &[Self]) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
-    M: ConstraintSystem<Scalar, Root = MultiEq<Scalar, CS>>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
+    M: ConstraintSystem<Scalar, NumSplits, Root = MultiEq<Scalar, NumSplits, CS>>,
   {
     // Make some arbitrary bounds for ourselves to avoid overflows
     // in the scalar field

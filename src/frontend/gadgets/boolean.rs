@@ -26,14 +26,14 @@ impl AllocatedBit {
   /// Allocate a variable in the constraint system which can only be a
   /// boolean value. Further, constrain that the boolean is false
   /// unless the condition is false.
-  pub fn alloc_conditionally<Scalar, CS>(
+  pub fn alloc_conditionally<Scalar, const NumSplits: usize, CS>(
     mut cs: CS,
     value: Option<bool>,
     must_be_false: &AllocatedBit,
   ) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let var = cs.alloc(
       || "boolean",
@@ -67,10 +67,10 @@ impl AllocatedBit {
 
   /// Allocate a variable in the constraint system which can only be a
   /// boolean value.
-  pub fn alloc<Scalar, CS>(mut cs: CS, value: Option<bool>) -> Result<Self, SynthesisError>
+  pub fn alloc<Scalar, const NumSplits: usize, CS>(mut cs: CS, value: Option<bool>) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let var = cs.alloc(
       || "boolean",
@@ -100,10 +100,10 @@ impl AllocatedBit {
 
   /// Performs an XOR operation over the two operands, returning
   /// an `AllocatedBit`.
-  pub fn xor<Scalar, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
+  pub fn xor<Scalar, const NumSplits: usize, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut result_value = None;
 
@@ -154,10 +154,10 @@ impl AllocatedBit {
 
   /// Performs an AND operation over the two operands, returning
   /// an `AllocatedBit`.
-  pub fn and<Scalar, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
+  pub fn and<Scalar, const NumSplits: usize, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut result_value = None;
 
@@ -194,10 +194,10 @@ impl AllocatedBit {
   }
 
   /// Calculates `a AND (NOT b)`.
-  pub fn and_not<Scalar, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
+  pub fn and_not<Scalar, const NumSplits: usize, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut result_value = None;
 
@@ -234,10 +234,10 @@ impl AllocatedBit {
   }
 
   /// Calculates `(NOT a) AND (NOT b)`.
-  pub fn nor<Scalar, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
+  pub fn nor<Scalar, const NumSplits: usize, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let mut result_value = None;
 
@@ -275,14 +275,14 @@ impl AllocatedBit {
 }
 
 /// Convert a field element into a vector of [`AllocatedBit`]'s representing its bits.
-pub fn field_into_allocated_bits_le<Scalar, CS>(
+pub fn field_into_allocated_bits_le<Scalar, const NumSplits: usize, CS>(
   mut cs: CS,
   value: Option<Scalar>,
 ) -> Result<Vec<AllocatedBit>, SynthesisError>
 where
   Scalar: PrimeField,
   Scalar: PrimeFieldBits,
-  CS: ConstraintSystem<Scalar>,
+  CS: ConstraintSystem<Scalar, NumSplits>,
 {
   // Deconstruct in big-endian bit order
   let values = match value {
@@ -340,10 +340,10 @@ impl Boolean {
   }
 
   /// Constrain two booleans to be equal.
-  pub fn enforce_equal<Scalar, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<(), SynthesisError>
+  pub fn enforce_equal<Scalar, const NumSplits: usize, CS>(mut cs: CS, a: &Self, b: &Self) -> Result<(), SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     match (a, b) {
       (&Boolean::Constant(a), &Boolean::Constant(b)) => {
@@ -396,18 +396,18 @@ impl Boolean {
   }
 
   /// Return a linear combination representing the boolean.
-  pub fn lc<Scalar: PrimeField>(&self, one: Variable, coeff: Scalar) -> LinearCombination<Scalar> {
+  pub fn lc<Scalar: PrimeField, const NumSplits: usize>(&self, one: Variable, coeff: Scalar) -> LinearCombination<Scalar, NumSplits> {
     match *self {
       Boolean::Constant(c) => {
         if c {
-          LinearCombination::<Scalar>::zero() + (coeff, one)
+          LinearCombination::<Scalar, NumSplits>::zero() + (coeff, one)
         } else {
-          LinearCombination::<Scalar>::zero()
+          LinearCombination::<Scalar, NumSplits>::zero()
         }
       }
-      Boolean::Is(ref v) => LinearCombination::<Scalar>::zero() + (coeff, v.get_variable()),
+      Boolean::Is(ref v) => LinearCombination::<Scalar, NumSplits>::zero() + (coeff, v.get_variable()),
       Boolean::Not(ref v) => {
-        LinearCombination::<Scalar>::zero() + (coeff, one) - (coeff, v.get_variable())
+        LinearCombination::<Scalar, NumSplits>::zero() + (coeff, one) - (coeff, v.get_variable())
       }
     }
   }
@@ -427,10 +427,10 @@ impl Boolean {
   }
 
   /// Perform XOR over two boolean operands
-  pub fn xor<'a, Scalar, CS>(cs: CS, a: &'a Self, b: &'a Self) -> Result<Self, SynthesisError>
+  pub fn xor<'a, Scalar, const NumSplits: usize, CS>(cs: CS, a: &'a Self, b: &'a Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     match (a, b) {
       (&Boolean::Constant(false), x) | (x, &Boolean::Constant(false)) => Ok(x.clone()),
@@ -448,10 +448,10 @@ impl Boolean {
   }
 
   /// Perform AND over two boolean operands
-  pub fn and<'a, Scalar, CS>(cs: CS, a: &'a Self, b: &'a Self) -> Result<Self, SynthesisError>
+  pub fn and<'a, Scalar, const NumSplits: usize, CS>(cs: CS, a: &'a Self, b: &'a Self) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     match (a, b) {
       // false AND x is always false
@@ -473,14 +473,14 @@ impl Boolean {
   }
 
   /// Perform OR over two boolean operands
-  pub fn or<'a, Scalar, CS>(
+  pub fn or<'a, Scalar, const NumSplits: usize, CS>(
     mut cs: CS,
     a: &'a Boolean,
     b: &'a Boolean,
   ) -> Result<Boolean, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     Ok(Boolean::not(&Boolean::and(
       cs.namespace(|| "not and (not a) (not b)"),
@@ -490,7 +490,7 @@ impl Boolean {
   }
 
   /// Computes (a and b) xor ((not a) and c)
-  pub fn sha256_ch<'a, Scalar, CS>(
+  pub fn sha256_ch<'a, Scalar, const NumSplits: usize, CS>(
     mut cs: CS,
     a: &'a Self,
     b: &'a Self,
@@ -498,7 +498,7 @@ impl Boolean {
   ) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let ch_value = match (a.get_value(), b.get_value(), c.get_value()) {
       (Some(a), Some(b), Some(c)) => {
@@ -600,7 +600,7 @@ impl Boolean {
   }
 
   /// Computes (a and b) xor (a and c) xor (b and c)
-  pub fn sha256_maj<'a, Scalar, CS>(
+  pub fn sha256_maj<'a, Scalar, const NumSplits: usize, CS>(
     mut cs: CS,
     a: &'a Self,
     b: &'a Self,
@@ -608,7 +608,7 @@ impl Boolean {
   ) -> Result<Self, SynthesisError>
   where
     Scalar: PrimeField,
-    CS: ConstraintSystem<Scalar>,
+    CS: ConstraintSystem<Scalar, NumSplits>,
   {
     let maj_value = match (a.get_value(), b.get_value(), c.get_value()) {
       (Some(a), Some(b), Some(c)) => {

@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 use ff::PrimeField;
 
 /// A helper trait for a step of the incremental computation (i.e., circuit for F)
-pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
+pub trait StepCircuit<F: PrimeField, const NumSplits: usize>: Send + Sync + Clone {
   /// Return the number of inputs or outputs of each step
   /// (this method is called only at circuit synthesis time)
   /// `synthesize` and `output` methods are expected to take as
@@ -13,29 +13,29 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
 
   /// Synthesize the circuit for a computation step and return variable
   /// that corresponds to the output of the step `z_{i+1}`
-  fn synthesize<CS: ConstraintSystem<F>>(
+  fn synthesize<CS: ConstraintSystem<F, NumSplits>>(
     &self,
     cs: &mut CS,
-    z: &[AllocatedNum<F>],
-  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>;
+    z: &[AllocatedNum<F, NumSplits>],
+  ) -> Result<Vec<AllocatedNum<F, NumSplits>>, SynthesisError>;
 }
 
 /// A trivial step circuit that simply returns the input
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TrivialCircuit<F: PrimeField> {
+pub struct TrivialCircuit<F: PrimeField, const NumSplits: usize> {
   _p: PhantomData<F>,
 }
 
-impl<F: PrimeField> StepCircuit<F> for TrivialCircuit<F> {
+impl<F: PrimeField, const NumSplits: usize> StepCircuit<F, NumSplits> for TrivialCircuit<F, NumSplits> {
   fn arity(&self) -> usize {
     1
   }
 
-  fn synthesize<CS: ConstraintSystem<F>>(
+  fn synthesize<CS: ConstraintSystem<F, NumSplits>>(
     &self,
     _cs: &mut CS,
-    z: &[AllocatedNum<F>],
-  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+    z: &[AllocatedNum<F, NumSplits>],
+  ) -> Result<Vec<AllocatedNum<F, NumSplits>>, SynthesisError> {
     Ok(z.to_vec())
   }
 }

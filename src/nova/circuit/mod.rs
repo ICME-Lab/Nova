@@ -87,14 +87,14 @@ impl<E: Engine> NovaAugmentedCircuitInputs<E> {
 
 /// The augmented circuit F' in Nova that includes a step circuit F
 /// and the circuit for the verifier in Nova's non-interactive folding scheme
-pub struct NovaAugmentedCircuit<'a, E: Engine, SC: StepCircuit<E::Base>> {
+pub struct NovaAugmentedCircuit<'a, E: Engine, const NumSplits: usize, SC: StepCircuit<E::Base, NumSplits>> {
   params: &'a NovaAugmentedCircuitParams,
   ro_consts: ROConstantsCircuit<E>,
   inputs: Option<NovaAugmentedCircuitInputs<E>>,
   step_circuit: &'a SC, // The function that is applied for each step
 }
 
-impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
+impl<'a, E: Engine, const NumSplits: usize, SC: StepCircuit<E::Base, NumSplits>> NovaAugmentedCircuit<'a, E, NumSplits, SC> {
   /// Create a new verification circuit for the input relaxed r1cs instances
   pub const fn new(
     params: &'a NovaAugmentedCircuitParams,
@@ -111,26 +111,26 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
   }
 
   /// Allocate all witnesses and return
-  fn alloc_witness<CS: ConstraintSystem<<E as Engine>::Base>>(
+  fn alloc_witness<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     &self,
     mut cs: CS,
     arity: usize,
   ) -> Result<
     (
-      AllocatedNum<E::Base>,
-      AllocatedNum<E::Base>,
-      Vec<AllocatedNum<E::Base>>,
-      Vec<AllocatedNum<E::Base>>,
-      AllocatedRelaxedR1CSInstance<E>,
-      AllocatedNum<E::Base>,
-      AllocatedNum<E::Base>,
-      AllocatedR1CSInstance<E>,
-      AllocatedPoint<E>,
+      AllocatedNum<E::Base, NumSplits>,
+      AllocatedNum<E::Base, NumSplits>,
+      Vec<AllocatedNum<E::Base, NumSplits>>,
+      Vec<AllocatedNum<E::Base, NumSplits>>,
+      AllocatedRelaxedR1CSInstance<E, NumSplits>,
+      AllocatedNum<E::Base, NumSplits>,
+      AllocatedNum<E::Base, NumSplits>,
+      AllocatedR1CSInstance<E, NumSplits>,
+      AllocatedPoint<E, NumSplits>,
     ),
     SynthesisError,
   > {
     // Allocate the params
-    let params = alloc_scalar_as_base::<E, _>(
+    let params = alloc_scalar_as_base::<E, NumSplits, _>(
       cs.namespace(|| "params"),
       self.inputs.as_ref().map(|inputs| inputs.params),
     )?;
@@ -145,7 +145,7 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
           Ok(self.inputs.get()?.z0[i])
         })
       })
-      .collect::<Result<Vec<AllocatedNum<E::Base>>, _>>()?;
+      .collect::<Result<Vec<AllocatedNum<E::Base, NumSplits>>, _>>()?;
 
     // Allocate zi. If inputs.zi is not provided (base case) allocate default value 0
     let zero = vec![E::Base::ZERO; arity];
@@ -155,10 +155,10 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
           Ok(self.inputs.get()?.zi.as_ref().unwrap_or(&zero)[i])
         })
       })
-      .collect::<Result<Vec<AllocatedNum<E::Base>>, _>>()?;
+      .collect::<Result<Vec<AllocatedNum<E::Base, NumSplits>>, _>>()?;
 
     // Allocate the running instance
-    let U: AllocatedRelaxedR1CSInstance<E> = AllocatedRelaxedR1CSInstance::alloc(
+    let U: AllocatedRelaxedR1CSInstance<E, NumSplits> = AllocatedRelaxedR1CSInstance::alloc(
       cs.namespace(|| "Allocate U"),
       self.inputs.as_ref().and_then(|inputs| inputs.U.as_ref()),
       self.params.limb_width,
@@ -193,12 +193,12 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
   }
 
   /// Synthesizes base case and returns the new relaxed `R1CSInstance`
-  fn synthesize_base_case<CS: ConstraintSystem<<E as Engine>::Base>>(
+  fn synthesize_base_case<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     &self,
     mut cs: CS,
-    u: AllocatedR1CSInstance<E>,
-  ) -> Result<AllocatedRelaxedR1CSInstance<E>, SynthesisError> {
-    let U_default: AllocatedRelaxedR1CSInstance<E> = if self.params.is_primary_circuit {
+    u: AllocatedR1CSInstance<E, NumSplits>,
+  ) -> Result<AllocatedRelaxedR1CSInstance<E, NumSplits>, SynthesisError> {
+    let U_default: AllocatedRelaxedR1CSInstance<E, NumSplits> = if self.params.is_primary_circuit {
       // The primary circuit just returns the default R1CS instance
       AllocatedRelaxedR1CSInstance::default(
         cs.namespace(|| "Allocate U_default"),
@@ -219,18 +219,18 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
 
   /// Synthesizes non base case and returns the new relaxed `R1CSInstance`
   /// And a boolean indicating if all checks pass
-  fn synthesize_non_base_case<CS: ConstraintSystem<<E as Engine>::Base>>(
+  fn synthesize_non_base_case<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     &self,
     mut cs: CS,
-    params: &AllocatedNum<E::Base>,
-    i: &AllocatedNum<E::Base>,
-    z_0: &[AllocatedNum<E::Base>],
-    z_i: &[AllocatedNum<E::Base>],
-    U: &AllocatedRelaxedR1CSInstance<E>,
-    r_i: &AllocatedNum<E::Base>,
-    u: &AllocatedR1CSInstance<E>,
-    T: &AllocatedPoint<E>,
-  ) -> Result<(AllocatedRelaxedR1CSInstance<E>, AllocatedBit), SynthesisError> {
+    params: &AllocatedNum<E::Base, NumSplits>,
+    i: &AllocatedNum<E::Base, NumSplits>,
+    z_0: &[AllocatedNum<E::Base, NumSplits>],
+    z_i: &[AllocatedNum<E::Base, NumSplits>],
+    U: &AllocatedRelaxedR1CSInstance<E, NumSplits>,
+    r_i: &AllocatedNum<E::Base, NumSplits>,
+    u: &AllocatedR1CSInstance<E, NumSplits>,
+    T: &AllocatedPoint<E, NumSplits>,
+  ) -> Result<(AllocatedRelaxedR1CSInstance<E, NumSplits>, AllocatedBit), SynthesisError> {
     // Check that u.x[0] = Hash(params, U, i, z0, zi)
     let mut ro = E::ROCircuit::new(self.ro_consts.clone());
     ro.absorb(params);
@@ -267,17 +267,17 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
   }
 }
 
-impl<E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'_, E, SC> {
+impl<E: Engine, const NumSplits: usize, SC: StepCircuit<E::Base, NumSplits>> NovaAugmentedCircuit<'_, E, NumSplits, SC> {
   /// synthesize circuit giving constraint system
-  pub fn synthesize<CS: ConstraintSystem<<E as Engine>::Base>>(
+  pub fn synthesize<CS: ConstraintSystem<<E as Engine>::Base, NumSplits>>(
     self,
     cs: &mut CS,
-  ) -> Result<Vec<AllocatedNum<E::Base>>, SynthesisError> {
+  ) -> Result<Vec<AllocatedNum<E::Base, NumSplits>>, SynthesisError> {
     let arity = self.step_circuit.arity();
 
     // Allocate all witnesses
     let (params, i, z_0, z_i, U, r_i, r_next, u, T) =
-      self.alloc_witness(cs.namespace(|| "allocate the circuit witness"), arity)?;
+      self.alloc_witness(cs.namespace(|| "allocate the circuit witness"), arity)?;  
 
     // Compute variable indicating if this is the base case
     let zero = alloc_zero(cs.namespace(|| "zero"));

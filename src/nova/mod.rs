@@ -36,12 +36,12 @@ use nifs::{NIFSRelaxed, NIFS};
 /// A type that holds public parameters of Nova
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct PublicParams<E1, E2, C1, C2>
+pub struct PublicParams<E1, E2, C1, C2, const NumSplits: usize>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
 {
   F_arity_primary: usize,
   F_arity_secondary: usize,
@@ -60,21 +60,21 @@ where
   _p: PhantomData<(C1, C2)>,
 }
 
-impl<E1, E2, C1, C2> SimpleDigestible for PublicParams<E1, E2, C1, C2>
+impl<E1, E2, C1, C2, const NumSplits: usize> SimpleDigestible for PublicParams<E1, E2, C1, C2, NumSplits>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
 {
 }
 
-impl<E1, E2, C1, C2> PublicParams<E1, E2, C1, C2>
+impl<E1, E2, C1, C2, const NumSplits: usize> PublicParams<E1, E2, C1, C2, NumSplits>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
 {
   /// Creates a new `PublicParams` for a pair of circuits `C1` and `C2`.
   ///
@@ -141,24 +141,24 @@ where
     let ro_consts_circuit_secondary: ROConstantsCircuit<E1> = ROConstantsCircuit::<E1>::default();
 
     // Initialize ck for the primary
-    let circuit_primary: NovaAugmentedCircuit<'_, E2, C1> = NovaAugmentedCircuit::new(
+    let circuit_primary: NovaAugmentedCircuit<'_, E2, NumSplits, C1> = NovaAugmentedCircuit::new(
       &augmented_circuit_params_primary,
       None,
       c_primary,
       ro_consts_circuit_primary.clone(),
     );
-    let mut cs: ShapeCS<E1> = ShapeCS::new();
+    let mut cs: ShapeCS<E1, NumSplits> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint1);
 
     // Initialize ck for the secondary
-    let circuit_secondary: NovaAugmentedCircuit<'_, E1, C2> = NovaAugmentedCircuit::new(
+    let circuit_secondary: NovaAugmentedCircuit<'_, E1, NumSplits, C2> = NovaAugmentedCircuit::new(
       &augmented_circuit_params_secondary,
       None,
       c_secondary,
       ro_consts_circuit_secondary.clone(),
     );
-    let mut cs: ShapeCS<E2> = ShapeCS::new();
+    let mut cs: ShapeCS<E2, NumSplits> = ShapeCS::new();
     let _ = circuit_secondary.synthesize(&mut cs);
     let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape(ck_hint2);
 
@@ -218,12 +218,12 @@ where
 /// A SNARK that proves the correct execution of an incremental computation
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct RecursiveSNARK<E1, E2, C1, C2>
+pub struct RecursiveSNARK<E1, E2, C1, C2, const NumSplits: usize>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
 {
   z0_primary: Vec<E1::Scalar>,
   z0_secondary: Vec<E2::Scalar>,
@@ -241,16 +241,16 @@ where
   _p: PhantomData<(C1, C2)>,
 }
 
-impl<E1, E2, C1, C2> RecursiveSNARK<E1, E2, C1, C2>
+impl<E1, E2, C1, C2, const NumSplits: usize> RecursiveSNARK<E1, E2, C1, C2, NumSplits>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
 {
   /// Create new instance of recursive SNARK
   pub fn new(
-    pp: &PublicParams<E1, E2, C1, C2>,
+    pp: &PublicParams<E1, E2, C1, C2, NumSplits>,
     c_primary: &C1,
     c_secondary: &C2,
     z0_primary: &[E1::Scalar],
@@ -264,7 +264,7 @@ where
     let ri_secondary = E2::Scalar::random(&mut OsRng);
 
     // base case for the primary
-    let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let mut cs_primary = SatisfyingAssignment::<E1, NumSplits>::new();
     let inputs_primary: NovaAugmentedCircuitInputs<E2> = NovaAugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       E1::Scalar::ZERO,
@@ -277,7 +277,7 @@ where
       None,
     );
 
-    let circuit_primary: NovaAugmentedCircuit<'_, E2, C1> = NovaAugmentedCircuit::new(
+    let circuit_primary: NovaAugmentedCircuit<'_, E2, NumSplits, C1> = NovaAugmentedCircuit::new(
       &pp.augmented_circuit_params_primary,
       Some(inputs_primary),
       c_primary,
@@ -288,7 +288,7 @@ where
       cs_primary.r1cs_instance_and_witness(&pp.r1cs_shape_primary, &pp.ck_primary)?;
 
     // base case for the secondary
-    let mut cs_secondary = SatisfyingAssignment::<E2>::new();
+    let mut cs_secondary = SatisfyingAssignment::<E2, NumSplits>::new();
     let inputs_secondary: NovaAugmentedCircuitInputs<E1> = NovaAugmentedCircuitInputs::new(
       pp.digest(),
       E2::Scalar::ZERO,
@@ -300,7 +300,7 @@ where
       Some(u_primary.clone()),
       None,
     );
-    let circuit_secondary: NovaAugmentedCircuit<'_, E1, C2> = NovaAugmentedCircuit::new(
+    let circuit_secondary: NovaAugmentedCircuit<'_, E1, NumSplits, C2> = NovaAugmentedCircuit::new(
       &pp.augmented_circuit_params_secondary,
       Some(inputs_secondary),
       c_secondary,
@@ -361,7 +361,7 @@ where
   /// by executing a step of the incremental computation
   pub fn prove_step(
     &mut self,
-    pp: &PublicParams<E1, E2, C1, C2>,
+    pp: &PublicParams<E1, E2, C1, C2, NumSplits>,
     c_primary: &C1,
     c_secondary: &C2,
   ) -> Result<(), NovaError> {
@@ -385,7 +385,7 @@ where
 
     let r_next_primary = E1::Scalar::random(&mut OsRng);
 
-    let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let mut cs_primary = SatisfyingAssignment::<E1, NumSplits>::new();
     let inputs_primary: NovaAugmentedCircuitInputs<E2> = NovaAugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       E1::Scalar::from(self.i as u64),
@@ -398,7 +398,7 @@ where
       Some(nifs_secondary.comm_T),
     );
 
-    let circuit_primary: NovaAugmentedCircuit<'_, E2, C1> = NovaAugmentedCircuit::new(
+    let circuit_primary: NovaAugmentedCircuit<'_, E2, NumSplits, C1> = NovaAugmentedCircuit::new(
       &pp.augmented_circuit_params_primary,
       Some(inputs_primary),
       c_primary,
@@ -423,7 +423,7 @@ where
 
     let r_next_secondary = E2::Scalar::random(&mut OsRng);
 
-    let mut cs_secondary = SatisfyingAssignment::<E2>::new();
+    let mut cs_secondary = SatisfyingAssignment::<E2, NumSplits>::new();
     let inputs_secondary: NovaAugmentedCircuitInputs<E1> = NovaAugmentedCircuitInputs::new(
       pp.digest(),
       E2::Scalar::from(self.i as u64),
@@ -436,7 +436,7 @@ where
       Some(nifs_primary.comm_T),
     );
 
-    let circuit_secondary: NovaAugmentedCircuit<'_, E1, C2> = NovaAugmentedCircuit::new(
+    let circuit_secondary: NovaAugmentedCircuit<'_, E1, NumSplits, C2> = NovaAugmentedCircuit::new(
       &pp.augmented_circuit_params_secondary,
       Some(inputs_secondary),
       c_secondary,
@@ -478,7 +478,7 @@ where
   /// Verify the correctness of the `RecursiveSNARK`
   pub fn verify(
     &self,
-    pp: &PublicParams<E1, E2, C1, C2>,
+    pp: &PublicParams<E1, E2, C1, C2, NumSplits>,
     num_steps: usize,
     z0_primary: &[E1::Scalar],
     z0_secondary: &[E2::Scalar],
@@ -591,12 +591,12 @@ where
 /// A type that holds the prover key for `CompressedSNARK`
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct ProverKey<E1, E2, C1, C2, S1, S2>
+pub struct ProverKey<E1, E2, C1, C2, S1, S2, const NumSplits: usize>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<E2>,
 {
@@ -608,12 +608,12 @@ where
 /// A type that holds the verifier key for `CompressedSNARK`
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct VerifierKey<E1, E2, C1, C2, S1, S2>
+pub struct VerifierKey<E1, E2, C1, C2, S1, S2, const NumSplits: usize>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<E2>,
 {
@@ -632,12 +632,12 @@ where
 /// A SNARK that proves the knowledge of a valid `RecursiveSNARK`
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct CompressedSNARK<E1, E2, C1, C2, S1, S2>
+pub struct CompressedSNARK<E1, E2, C1, C2, S1, S2, const NumSplits: usize>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<E2>,
 {
@@ -668,22 +668,22 @@ where
   _p: PhantomData<(C1, C2)>,
 }
 
-impl<E1, E2, C1, C2, S1, S2> CompressedSNARK<E1, E2, C1, C2, S1, S2>
+impl<E1, E2, C1, C2, S1, S2, const NumSplits: usize> CompressedSNARK<E1, E2, C1, C2, S1, S2, NumSplits>
 where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
-  C1: StepCircuit<E1::Scalar>,
-  C2: StepCircuit<E2::Scalar>,
+  C1: StepCircuit<E1::Scalar, NumSplits>,
+  C2: StepCircuit<E2::Scalar, NumSplits>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<E2>,
 {
   /// Creates prover and verifier keys for `CompressedSNARK`
   pub fn setup(
-    pp: &PublicParams<E1, E2, C1, C2>,
+    pp: &PublicParams<E1, E2, C1, C2, NumSplits>,
   ) -> Result<
     (
-      ProverKey<E1, E2, C1, C2, S1, S2>,
-      VerifierKey<E1, E2, C1, C2, S1, S2>,
+      ProverKey<E1, E2, C1, C2, S1, S2, NumSplits>,
+      VerifierKey<E1, E2, C1, C2, S1, S2, NumSplits>,
     ),
     NovaError,
   > {
@@ -714,9 +714,9 @@ where
 
   /// Create a new `CompressedSNARK` (provides zero-knowledge)
   pub fn prove(
-    pp: &PublicParams<E1, E2, C1, C2>,
-    pk: &ProverKey<E1, E2, C1, C2, S1, S2>,
-    recursive_snark: &RecursiveSNARK<E1, E2, C1, C2>,
+    pp: &PublicParams<E1, E2, C1, C2, NumSplits>,
+    pk: &ProverKey<E1, E2, C1, C2, S1, S2, NumSplits>,
+    recursive_snark: &RecursiveSNARK<E1, E2, C1, C2, NumSplits>,
   ) -> Result<Self, NovaError> {
     // prove three foldings
 
@@ -835,7 +835,7 @@ where
   /// Verify the correctness of the `CompressedSNARK` (provides zero-knowledge)
   pub fn verify(
     &self,
-    vk: &VerifierKey<E1, E2, C1, C2, S1, S2>,
+    vk: &VerifierKey<E1, E2, C1, C2, S1, S2, NumSplits>,
     num_steps: usize,
     z0_primary: &[E1::Scalar],
     z0_secondary: &[E2::Scalar],

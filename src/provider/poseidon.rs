@@ -40,12 +40,12 @@ where
   _p: PhantomData<Scalar>,
 }
 
-impl<Base, Scalar> ROTrait<Base, Scalar> for PoseidonRO<Base, Scalar>
+impl<Base, Scalar, const NumSplits: usize> ROTrait<Base, Scalar, NumSplits> for PoseidonRO<Base, Scalar>
 where
   Base: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
   Scalar: PrimeField,
 {
-  type CircuitRO = PoseidonROCircuit<Base>;
+  type CircuitRO = PoseidonROCircuit<Base, NumSplits>;
   type Constants = PoseidonConstantsCircuit<Base>;
 
   fn new(constants: PoseidonConstantsCircuit<Base>) -> Self {
@@ -97,14 +97,14 @@ where
 
 /// A Poseidon-based RO gadget to use inside the verifier circuit.
 #[derive(Serialize, Deserialize)]
-pub struct PoseidonROCircuit<Scalar: PrimeField> {
+pub struct PoseidonROCircuit<Scalar: PrimeField, const NumSplits: usize> {
   // Internal state
-  state: Vec<AllocatedNum<Scalar>>,
+  state: Vec<AllocatedNum<Scalar, NumSplits>>,
   constants: PoseidonConstantsCircuit<Scalar>,
   squeezed: bool,
 }
 
-impl<Scalar> ROCircuitTrait<Scalar> for PoseidonROCircuit<Scalar>
+impl<Scalar, const NumSplits: usize> ROCircuitTrait<Scalar, NumSplits> for PoseidonROCircuit<Scalar, NumSplits>
 where
   Scalar: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
 {
@@ -121,13 +121,13 @@ where
   }
 
   /// Absorb a new number into the state of the oracle
-  fn absorb(&mut self, e: &AllocatedNum<Scalar>) {
+  fn absorb(&mut self, e: &AllocatedNum<Scalar, NumSplits>) {
     assert!(!self.squeezed, "Cannot absorb after squeezing");
     self.state.push(e.clone());
   }
 
   /// Compute a challenge by hashing the current state
-  fn squeeze<CS: ConstraintSystem<Scalar>>(
+  fn squeeze<CS: ConstraintSystem<Scalar, NumSplits>>(
     &mut self,
     mut cs: CS,
     num_bits: usize,
@@ -151,7 +151,7 @@ where
         self.state.len() as u32,
         &(0..self.state.len())
           .map(|i| Elt::Allocated(self.state[i].clone()))
-          .collect::<Vec<Elt<Scalar>>>(),
+          .collect::<Vec<Elt<Scalar, NumSplits>>>(),
         acc,
       );
 

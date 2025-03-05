@@ -29,14 +29,17 @@ pub enum Index {
   Input(usize),
   /// Private auxiliary variable
   Aux(usize),
+  /// Precommitted variable
+  Precommitted((usize, usize)), // (split_idx, var_idx)
 }
 
 /// This represents a linear combination of some variables, with coefficients
 /// in the scalar field of a pairing-friendly elliptic curve group.
 #[derive(Clone, Debug, PartialEq)]
-pub struct LinearCombination<Scalar: PrimeField> {
+pub struct LinearCombination<Scalar: PrimeField, const NumSplits: usize> {
   inputs: Indexer<Scalar>,
   aux: Indexer<Scalar>,
+  precommitted: [Indexer<Scalar>; NumSplits],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,18 +126,23 @@ impl<T> Indexer<T> {
   }
 }
 
-impl<Scalar: PrimeField> Default for LinearCombination<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> Default for LinearCombination<Scalar, NumSplits> {
   fn default() -> Self {
     Self::zero()
   }
 }
 
-impl<Scalar: PrimeField> LinearCombination<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> LinearCombination<Scalar, NumSplits> {
   /// This returns a zero [`LinearCombination`].
-  pub fn zero() -> LinearCombination<Scalar> {
+  pub fn zero() -> LinearCombination<Scalar, NumSplits> {
     LinearCombination {
       inputs: Default::default(),
       aux: Default::default(),
+      precommitted: {
+        let mut precommitted = Vec::with_capacity(NumSplits);
+        precommitted.resize_with(NumSplits, || Indexer::<Scalar>::default());
+        precommitted.try_into().unwrap()
+      },
     }
   }
 
@@ -144,11 +152,32 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
       Variable(Index::Input(i)) => Self {
         inputs: Indexer::from_value(i, coeff),
         aux: Default::default(),
+        precommitted: {
+          let mut precommitted = Vec::with_capacity(NumSplits);
+          precommitted.resize_with(NumSplits, || Indexer::<Scalar>::default());
+          precommitted.try_into().unwrap()
+        },
       },
       Variable(Index::Aux(i)) => Self {
         inputs: Default::default(),
         aux: Indexer::from_value(i, coeff),
+        precommitted: {
+          let mut precommitted = Vec::with_capacity(NumSplits);
+          precommitted.resize_with(NumSplits, || Indexer::<Scalar>::default());
+          precommitted.try_into().unwrap()
+        },
       },
+      Variable(Index::Precommitted((split_i, i))) => {
+        let mut precommitted = Vec::with_capacity(NumSplits);
+        precommitted.resize_with(NumSplits, || Indexer::<Scalar>::default());
+        let mut precommitted: [Indexer<Scalar>; NumSplits] = precommitted.try_into().unwrap();
+        precommitted[split_i] = Indexer::from_value(i, coeff);
+        Self {
+          inputs: Default::default(),
+          aux: Default::default(),
+          precommitted,
+        }
+      }
     }
   }
 
@@ -207,12 +236,15 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
   }
 
   /// Add unsimplified
-  pub fn add_unsimplified(mut self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar> {
+  pub fn add_unsimplified(mut self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar, NumSplits> {
     match var.0 {
       Index::Input(new_var) => {
         self.add_assign_unsimplified_input(new_var, coeff);
       }
       Index::Aux(new_var) => {
+        self.add_assign_unsimplified_aux(new_var, coeff);
+      }
+      Index::Precommitted((_split_i, new_var)) => {
         self.add_assign_unsimplified_aux(new_var, coeff);
       }
     }
@@ -231,12 +263,15 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
   }
 
   /// Sub unsimplified
-  pub fn sub_unsimplified(mut self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar> {
+  pub fn sub_unsimplified(mut self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar, NumSplits> {
     match var.0 {
       Index::Input(new_var) => {
         self.sub_assign_unsimplified_input(new_var, coeff);
       }
       Index::Aux(new_var) => {
+        self.sub_assign_unsimplified_aux(new_var, coeff);
+      }
+      Index::Precommitted((_split_i, new_var)) => {
         self.sub_assign_unsimplified_aux(new_var, coeff);
       }
     }
@@ -280,43 +315,43 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
   }
 }
 
-impl<Scalar: PrimeField> Add<(Scalar, Variable)> for LinearCombination<Scalar> {
-  type Output = LinearCombination<Scalar>;
+impl<Scalar: PrimeField, const NumSplits: usize> Add<(Scalar, Variable)> for LinearCombination<Scalar, NumSplits> {
+  type Output = LinearCombination<Scalar, NumSplits>;
 
-  fn add(self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar> {
+  fn add(self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar, NumSplits> {
     self.add_unsimplified((coeff, var))
   }
 }
 
-impl<Scalar: PrimeField> Sub<(Scalar, Variable)> for LinearCombination<Scalar> {
-  type Output = LinearCombination<Scalar>;
+impl<Scalar: PrimeField, const NumSplits: usize> Sub<(Scalar, Variable)> for LinearCombination<Scalar, NumSplits> {
+  type Output = LinearCombination<Scalar, NumSplits>;
 
   #[allow(clippy::suspicious_arithmetic_impl)]
-  fn sub(self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar> {
+  fn sub(self, (coeff, var): (Scalar, Variable)) -> LinearCombination<Scalar, NumSplits> {
     self.sub_unsimplified((coeff, var))
   }
 }
 
-impl<Scalar: PrimeField> Add<Variable> for LinearCombination<Scalar> {
-  type Output = LinearCombination<Scalar>;
+impl<Scalar: PrimeField, const NumSplits: usize> Add<Variable> for LinearCombination<Scalar, NumSplits> {
+  type Output = LinearCombination<Scalar, NumSplits>;
 
-  fn add(self, other: Variable) -> LinearCombination<Scalar> {
+  fn add(self, other: Variable) -> LinearCombination<Scalar, NumSplits> {
     self + (Scalar::ONE, other)
   }
 }
 
-impl<Scalar: PrimeField> Sub<Variable> for LinearCombination<Scalar> {
-  type Output = LinearCombination<Scalar>;
+impl<Scalar: PrimeField, const NumSplits: usize> Sub<Variable> for LinearCombination<Scalar, NumSplits> {
+  type Output = LinearCombination<Scalar, NumSplits>;
 
-  fn sub(self, other: Variable) -> LinearCombination<Scalar> {
+  fn sub(self, other: Variable) -> LinearCombination<Scalar, NumSplits> {
     self - (Scalar::ONE, other)
   }
 }
 
-impl<'a, Scalar: PrimeField> Add<&'a LinearCombination<Scalar>> for LinearCombination<Scalar> {
-  type Output = LinearCombination<Scalar>;
+impl<'a, Scalar: PrimeField, const NumSplits: usize> Add<&'a LinearCombination<Scalar, NumSplits>> for LinearCombination<Scalar, NumSplits> {
+  type Output = LinearCombination<Scalar, NumSplits>;
 
-  fn add(mut self, other: &'a LinearCombination<Scalar>) -> LinearCombination<Scalar> {
+  fn add(mut self, other: &'a LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits> {
     for (var, val) in other.inputs.iter() {
       self.add_assign_unsimplified_input(*var, *val);
     }
@@ -329,10 +364,10 @@ impl<'a, Scalar: PrimeField> Add<&'a LinearCombination<Scalar>> for LinearCombin
   }
 }
 
-impl<'a, Scalar: PrimeField> Sub<&'a LinearCombination<Scalar>> for LinearCombination<Scalar> {
-  type Output = LinearCombination<Scalar>;
+impl<'a, Scalar: PrimeField, const NumSplits: usize> Sub<&'a LinearCombination<Scalar, NumSplits>> for LinearCombination<Scalar, NumSplits> {
+  type Output = LinearCombination<Scalar, NumSplits>;
 
-  fn sub(mut self, other: &'a LinearCombination<Scalar>) -> LinearCombination<Scalar> {
+  fn sub(mut self, other: &'a LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits> {
     for (var, val) in other.inputs.iter() {
       self.sub_assign_unsimplified_input(*var, *val);
     }
@@ -345,15 +380,15 @@ impl<'a, Scalar: PrimeField> Sub<&'a LinearCombination<Scalar>> for LinearCombin
   }
 }
 
-impl<'a, Scalar: PrimeField> Add<(Scalar, &'a LinearCombination<Scalar>)>
-  for LinearCombination<Scalar>
+impl<'a, Scalar: PrimeField, const NumSplits: usize> Add<(Scalar, &'a LinearCombination<Scalar, NumSplits>)>
+  for LinearCombination<Scalar, NumSplits>
 {
-  type Output = LinearCombination<Scalar>;
+  type Output = LinearCombination<Scalar, NumSplits>;
 
   fn add(
     mut self,
-    (coeff, other): (Scalar, &'a LinearCombination<Scalar>),
-  ) -> LinearCombination<Scalar> {
+    (coeff, other): (Scalar, &'a LinearCombination<Scalar, NumSplits>),
+  ) -> LinearCombination<Scalar, NumSplits> {
     for (var, val) in other.inputs.iter() {
       self.add_assign_unsimplified_input(*var, *val * coeff);
     }
@@ -366,15 +401,15 @@ impl<'a, Scalar: PrimeField> Add<(Scalar, &'a LinearCombination<Scalar>)>
   }
 }
 
-impl<'a, Scalar: PrimeField> Sub<(Scalar, &'a LinearCombination<Scalar>)>
-  for LinearCombination<Scalar>
+impl<'a, Scalar: PrimeField, const NumSplits: usize> Sub<(Scalar, &'a LinearCombination<Scalar, NumSplits>)>
+  for LinearCombination<Scalar, NumSplits>
 {
-  type Output = LinearCombination<Scalar>;
+  type Output = LinearCombination<Scalar, NumSplits>;
 
   fn sub(
     mut self,
-    (coeff, other): (Scalar, &'a LinearCombination<Scalar>),
-  ) -> LinearCombination<Scalar> {
+    (coeff, other): (Scalar, &'a LinearCombination<Scalar, NumSplits>),
+  ) -> LinearCombination<Scalar, NumSplits> {
     for (var, val) in other.inputs.iter() {
       self.sub_assign_unsimplified_input(*var, *val * coeff);
     }

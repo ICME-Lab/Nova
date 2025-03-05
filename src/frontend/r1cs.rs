@@ -30,7 +30,7 @@ pub trait NovaShape<E: Engine> {
   fn r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>);
 }
 
-impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
+impl<E: Engine, const NumSplits: usize> NovaWitness<E> for SatisfyingAssignment<E, NumSplits> {
   fn r1cs_instance_and_witness(
     &self,
     shape: &R1CSShape<E>,
@@ -49,7 +49,7 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
 
 macro_rules! impl_nova_shape {
   ( $name:ident) => {
-    impl<E: Engine> NovaShape<E> for $name<E>
+    impl<E: Engine, const NumSplits: usize> NovaShape<E> for $name<E, NumSplits>
     where
       E::Scalar: PrimeField,
     {
@@ -92,7 +92,7 @@ macro_rules! impl_nova_shape {
 impl_nova_shape!(ShapeCS);
 impl_nova_shape!(TestShapeCS);
 
-fn add_constraint<S: PrimeField>(
+fn add_constraint<S: PrimeField, const NumSplits: usize>(
   X: &mut (
     &mut SparseMatrix<S>,
     &mut SparseMatrix<S>,
@@ -100,9 +100,9 @@ fn add_constraint<S: PrimeField>(
     &mut usize,
   ),
   num_vars: usize,
-  a_lc: &LinearCombination<S>,
-  b_lc: &LinearCombination<S>,
-  c_lc: &LinearCombination<S>,
+  a_lc: &LinearCombination<S, NumSplits>,
+  b_lc: &LinearCombination<S, NumSplits>,
+  c_lc: &LinearCombination<S, NumSplits>,
 ) {
   let (A, B, C, nn) = X;
   let n = **nn;
@@ -122,6 +122,10 @@ fn add_constraint<S: PrimeField>(
           M.indices.push(idx);
         }
         Index::Aux(idx) => {
+          M.data.push(*coeff);
+          M.indices.push(idx);
+        }
+        Index::Precommitted((_split_i, idx)) => {
           M.data.push(*coeff);
           M.indices.push(idx);
         }

@@ -30,6 +30,9 @@ pub trait Engine: Clone + Copy + Debug + Send + Sync + Sized + Eq + PartialEq {
   /// A type representing an element of the base field of the group
   type Base: PrimeFieldBits + TranscriptReprTrait<Self::GE> + Serialize + for<'de> Deserialize<'de>;
 
+  /// A type representing the number of splits
+  const NUM_SPLITS: usize;
+
   /// A type representing an element of the scalar field of the group
   type Scalar: PrimeFieldBits
     + PrimeFieldExt
@@ -44,10 +47,10 @@ pub trait Engine: Clone + Copy + Debug + Send + Sync + Sized + Eq + PartialEq {
 
   /// A type that represents a circuit-friendly sponge that consumes elements
   /// from the base field and squeezes out elements of the scalar field
-  type RO: ROTrait<Self::Base, Self::Scalar>;
+  type RO: ROTrait<Self::Base, Self::Scalar,  { Self::NUM_SPLITS }>;
 
   /// An alternate implementation of `Self::RO` in the circuit model
-  type ROCircuit: ROCircuitTrait<Self::Base>;
+  type ROCircuit: ROCircuitTrait<Self::Base, { Self::NUM_SPLITS }>;
 
   /// A type that provides a generic Fiat-Shamir transcript to be used when externalizing proofs
   type TE: TranscriptEngineTrait<Self>;
@@ -63,9 +66,9 @@ pub trait AbsorbInROTrait<E: Engine> {
 }
 
 /// A helper trait that defines the behavior of a hash function that we use as an RO
-pub trait ROTrait<Base: PrimeField, Scalar> {
+pub trait ROTrait<Base: PrimeField, Scalar, const NumSplits: usize> {
   /// The circuit alter ego of this trait impl - this constrains it to use the same constants
-  type CircuitRO: ROCircuitTrait<Base, Constants = Self::Constants>;
+  type CircuitRO: ROCircuitTrait<Base, NumSplits, Constants = Self::Constants>;
 
   /// A type representing constants/parameters associated with the hash function
   type Constants: Default + Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
@@ -82,9 +85,9 @@ pub trait ROTrait<Base: PrimeField, Scalar> {
 }
 
 /// A helper trait that defines the behavior of a hash function that we use as an RO in the circuit model
-pub trait ROCircuitTrait<Base: PrimeField> {
+pub trait ROCircuitTrait<Base: PrimeField, const NumSplits: usize> {
   /// the vanilla alter ego of this trait - this constrains it to use the same constants
-  type NativeRO<T: PrimeField>: ROTrait<Base, T, Constants = Self::Constants>;
+  type NativeRO<T: PrimeField>: ROTrait<Base, T, NumSplits, Constants = Self::Constants>;
 
   /// A type representing constants/parameters associated with the hash function on this Base field
   type Constants: Default + Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
@@ -93,11 +96,11 @@ pub trait ROCircuitTrait<Base: PrimeField> {
   fn new(constants: Self::Constants) -> Self;
 
   /// Adds a scalar to the internal state
-  fn absorb(&mut self, e: &AllocatedNum<Base>);
+  fn absorb(&mut self, e: &AllocatedNum<Base, NumSplits>);
 
   /// Returns a challenge of `num_bits` by hashing the internal state
   /// The `squeeze` method can be called only once
-  fn squeeze<CS: ConstraintSystem<Base>>(
+  fn squeeze<CS: ConstraintSystem<Base, NumSplits>>(
     &mut self,
     cs: CS,
     num_bits: usize,
@@ -106,11 +109,11 @@ pub trait ROCircuitTrait<Base: PrimeField> {
 
 /// An alias for constants associated with E::RO
 pub type ROConstants<E> =
-  <<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar>>::Constants;
+  <<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar, { <E as Engine>::NUM_SPLITS }>>::Constants;
 
 /// An alias for constants associated with `E::ROCircuit`
 pub type ROConstantsCircuit<E> =
-  <<E as Engine>::ROCircuit as ROCircuitTrait<<E as Engine>::Base>>::Constants;
+  <<E as Engine>::ROCircuit as ROCircuitTrait<<E as Engine>::Base, { E::NUM_SPLITS }>>::Constants;
 
 /// This trait allows types to implement how they want to be added to `TranscriptEngine`
 pub trait TranscriptReprTrait<G: Group>: Send + Sync {

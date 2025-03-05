@@ -46,27 +46,31 @@ impl Ord for OrderedVariable {
       }
       (Index::Input(_), Index::Aux(_)) => Ordering::Less,
       (Index::Aux(_), Index::Input(_)) => Ordering::Greater,
+      (Index::Input(_), _) | (Index::Aux(_), _) => Ordering::Less,
+      (_, Index::Input(_)) | (_, Index::Aux(_)) => Ordering::Greater,
+      (_, _) => Ordering::Equal,
     }
   }
 }
 
 /// `TestShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
-pub struct TestShapeCS<E: Engine> {
+pub struct TestShapeCS<E: Engine, const NumSplits: usize> {
   named_objects: HashMap<String, NamedObject>,
   current_namespace: Vec<String>,
   /// All constraints added to the `TestShapeCS`.
   pub constraints: Vec<(
-    LinearCombination<E::Scalar>,
-    LinearCombination<E::Scalar>,
-    LinearCombination<E::Scalar>,
+    LinearCombination<E::Scalar, NumSplits>,
+    LinearCombination<E::Scalar, NumSplits>,
+    LinearCombination<E::Scalar, NumSplits>,
     String,
   )>,
   inputs: Vec<String>,
   aux: Vec<String>,
+  precommitted: [Vec<String>; NumSplits],
 }
 
-fn proc_lc<Scalar: PrimeField>(
-  terms: &LinearCombination<Scalar>,
+fn proc_lc<Scalar: PrimeField, const NumSplits: usize>(
+  terms: &LinearCombination<Scalar, NumSplits>,
 ) -> BTreeMap<OrderedVariable, Scalar> {
   let mut map = BTreeMap::new();
   for (var, &coeff) in terms.iter() {
@@ -91,7 +95,7 @@ fn proc_lc<Scalar: PrimeField>(
   map
 }
 
-impl<E: Engine> TestShapeCS<E>
+impl<E: Engine, const NumSplits: usize> TestShapeCS<E, NumSplits>
 where
   E::Scalar: PrimeField,
 {
@@ -114,6 +118,10 @@ where
   /// Returns the number of aux inputs defined for this `TestShapeCS`.
   pub fn num_aux(&self) -> usize {
     self.aux.len()
+  }
+
+  pub fn num_precommitted(&self) -> [usize; NumSplits] {
+    self.precommitted.iter().map(|v| v.len()).collect::<Vec<_>>().try_into().unwrap()
   }
 
   /// Print all public inputs, aux inputs, and constraint names.
@@ -150,10 +158,10 @@ where
       .map(|i| E::Scalar::from(2u64).pow_vartime([u64::from(i)]))
       .collect::<Vec<_>>();
 
-    let pp = |s: &mut String, lc: &LinearCombination<E::Scalar>| {
+    let pp = |s: &mut String, lc: &LinearCombination<E::Scalar, NumSplits>| {
       s.push('(');
       let mut is_first = true;
-      for (var, coeff) in proc_lc::<E::Scalar>(lc) {
+      for (var, coeff) in proc_lc::<E::Scalar, NumSplits>(lc) {
         if coeff == negone {
           s.push_str(" - ")
         } else if !is_first {
@@ -178,6 +186,9 @@ where
           }
           Index::Aux(i) => {
             write!(s, "`A{}`", &self.aux[i]).unwrap();
+          }
+          Index::Precommitted((split_i, i)) => {
+            write!(s, "`P{}`", &self.precommitted[split_i][i]).unwrap();
           }
         }
       }
@@ -216,21 +227,26 @@ where
   }
 }
 
-impl<E: Engine> Default for TestShapeCS<E> {
+impl<E: Engine, const NumSplits: usize> Default for TestShapeCS<E, NumSplits> {
   fn default() -> Self {
     let mut map = HashMap::new();
-    map.insert("ONE".into(), NamedObject::Var(TestShapeCS::<E>::one()));
+    map.insert("ONE".into(), NamedObject::Var(TestShapeCS::<E, NumSplits>::one()));
     TestShapeCS {
       named_objects: map,
       current_namespace: vec![],
       constraints: vec![],
       inputs: vec![String::from("ONE")],
       aux: vec![],
+      precommitted: {
+        let mut precommitted = Vec::with_capacity(NumSplits);
+        precommitted.resize_with(NumSplits, Vec::new);
+        precommitted.try_into().unwrap()
+      },
     }
   }
 }
 
-impl<E: Engine> ConstraintSystem<E::Scalar> for TestShapeCS<E>
+impl<E: Engine, const NumSplits: usize> ConstraintSystem<E::Scalar, NumSplits> for TestShapeCS<E, NumSplits>
 where
   E::Scalar: PrimeField,
 {
@@ -260,13 +276,25 @@ where
     Ok(Variable::new_unchecked(Index::Input(self.inputs.len() - 1)))
   }
 
+  fn alloc_precommitted<F, A, AR>(&mut self, annotation: A, _f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    let path = compute_path(&self.current_namespace, &annotation().into());
+    self.precommitted[idx].push(path);
+
+    Ok(Variable::new_unchecked(Index::Precommitted((idx, self.precommitted[idx].len() - 1))))
+  }
+
   fn enforce<A, AR, LA, LB, LC>(&mut self, annotation: A, a: LA, b: LB, c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<E::Scalar>) -> LinearCombination<E::Scalar>,
-    LB: FnOnce(LinearCombination<E::Scalar>) -> LinearCombination<E::Scalar>,
-    LC: FnOnce(LinearCombination<E::Scalar>) -> LinearCombination<E::Scalar>,
+    LA: FnOnce(LinearCombination<E::Scalar, NumSplits>) -> LinearCombination<E::Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<E::Scalar, NumSplits>) -> LinearCombination<E::Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<E::Scalar, NumSplits>) -> LinearCombination<E::Scalar, NumSplits>,
   {
     let path = compute_path(&self.current_namespace, &annotation().into());
     let index = self.constraints.len();

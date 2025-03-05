@@ -28,10 +28,10 @@ const IV: [u32; 8] = [
 ];
 
 /// Compute the SHA-256 hash of the given input.
-pub fn sha256<Scalar, CS>(mut cs: CS, input: &[Boolean]) -> Result<Vec<Boolean>, SynthesisError>
+pub fn sha256<Scalar, const NumSplits: usize, CS>(mut cs: CS, input: &[Boolean]) -> Result<Vec<Boolean>, SynthesisError>
 where
   Scalar: PrimeField,
-  CS: ConstraintSystem<Scalar>,
+  CS: ConstraintSystem<Scalar, NumSplits>,
 {
   assert!(input.len() % 8 == 0);
 
@@ -62,14 +62,14 @@ fn get_sha256_iv() -> Vec<UInt32> {
 }
 
 /// Sha256 compression function
-pub fn sha256_compression_function<Scalar, CS>(
+pub fn sha256_compression_function<Scalar, const NumSplits: usize, CS>(
   cs: CS,
   input: &[Boolean],
   current_hash_value: &[UInt32],
 ) -> Result<Vec<UInt32>, SynthesisError>
 where
   Scalar: PrimeField,
-  CS: ConstraintSystem<Scalar>,
+  CS: ConstraintSystem<Scalar, NumSplits>,
 {
   assert_eq!(input.len(), 512);
   assert_eq!(current_hash_value.len(), 8);
@@ -113,11 +113,11 @@ where
   }
 
   impl Maybe {
-    fn compute<Scalar, CS, M>(self, cs: M, others: &[UInt32]) -> Result<UInt32, SynthesisError>
+    fn compute<Scalar, CS, M, const NumSplits: usize>(self, cs: M, others: &[UInt32]) -> Result<UInt32, SynthesisError>
     where
       Scalar: PrimeField,
-      CS: ConstraintSystem<Scalar>,
-      M: ConstraintSystem<Scalar, Root = MultiEq<Scalar, CS>>,
+      CS: ConstraintSystem<Scalar, NumSplits>,
+      M: ConstraintSystem<Scalar, NumSplits, Root = MultiEq<Scalar, NumSplits, CS>>,
     {
       Ok(match self {
         Maybe::Concrete(ref v) => return Ok(v.clone()),

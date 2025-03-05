@@ -21,7 +21,7 @@ pub struct NIFS<E: Engine> {
 }
 
 type ROConstants<E> =
-  <<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar>>::Constants;
+  <<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar, {E::NUM_SPLITS}>>::Constants;
 
 impl<E: Engine> NIFS<E> {
   /// Takes as input a Relaxed R1CS instance-witness tuple `(U1, W1)` and
@@ -223,7 +223,7 @@ mod tests {
   use ff::{Field, PrimeField};
   use rand::rngs::OsRng;
 
-  fn synthesize_tiny_r1cs_bellpepper<Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
+  fn synthesize_tiny_r1cs_bellpepper<Scalar: PrimeField, CS: ConstraintSystem<Scalar, NumSplits>>(
     cs: &mut CS,
     x_val: Option<Scalar>,
   ) -> Result<(), SynthesisError> {

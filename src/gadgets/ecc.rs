@@ -15,19 +15,19 @@ use ff::{Field, PrimeField};
 
 /// `AllocatedPoint` provides an elliptic curve abstraction inside a circuit.
 #[derive(Clone)]
-pub struct AllocatedPoint<E: Engine> {
-  pub(crate) x: AllocatedNum<E::Base>,
-  pub(crate) y: AllocatedNum<E::Base>,
-  pub(crate) is_infinity: AllocatedNum<E::Base>,
+pub struct AllocatedPoint<E: Engine, const NumSplits: usize> {
+  pub(crate) x: AllocatedNum<E::Base, NumSplits>,
+  pub(crate) y: AllocatedNum<E::Base, NumSplits>,
+  pub(crate) is_infinity: AllocatedNum<E::Base, NumSplits>,
 }
 
-impl<E> AllocatedPoint<E>
+impl<E, const NumSplits: usize> AllocatedPoint<E, NumSplits>
 where
   E: Engine,
 {
   /// Allocates a new point on the curve using coordinates provided by `coords`.
   /// If coords = None, it allocates the default infinity point
-  pub fn alloc<CS: ConstraintSystem<E::Base>>(
+  pub fn alloc<CS: ConstraintSystem<E::Base, NumSplits>>(
     mut cs: CS,
     coords: Option<(E::Base, E::Base, bool)>,
   ) -> Result<Self, SynthesisError> {
@@ -57,7 +57,7 @@ where
   /// checks if `self` is on the curve or if it is infinity
   pub fn check_on_curve<CS>(&self, mut cs: CS) -> Result<(), SynthesisError>
   where
-    CS: ConstraintSystem<E::Base>,
+    CS: ConstraintSystem<E::Base, NumSplits>,
   {
     // check that (x,y) is on the curve if it is not infinity
     // we will check that (1- is_infinity) * y^2 = (1-is_infinity) * (x^3 + Ax + B)
@@ -101,7 +101,7 @@ where
   }
 
   /// Allocates a default point on the curve, set to the identity point.
-  pub fn default<CS: ConstraintSystem<E::Base>>(mut cs: CS) -> Result<Self, SynthesisError> {
+  pub fn default<CS: ConstraintSystem<E::Base, NumSplits>>(mut cs: CS) -> Result<Self, SynthesisError> {
     let zero = alloc_zero(cs.namespace(|| "zero"));
     let one = alloc_one(cs.namespace(|| "one"));
 
@@ -116,15 +116,15 @@ where
   pub const fn get_coordinates(
     &self,
   ) -> (
-    &AllocatedNum<E::Base>,
-    &AllocatedNum<E::Base>,
-    &AllocatedNum<E::Base>,
+    &AllocatedNum<E::Base, NumSplits>,
+    &AllocatedNum<E::Base, NumSplits>,
+    &AllocatedNum<E::Base, NumSplits>,
   ) {
     (&self.x, &self.y, &self.is_infinity)
   }
 
   /// Negates the provided point
-  pub fn negate<CS: ConstraintSystem<E::Base>>(&self, mut cs: CS) -> Result<Self, SynthesisError> {
+  pub fn negate<CS: ConstraintSystem<E::Base, NumSplits>>(&self, mut cs: CS) -> Result<Self, SynthesisError> {
     let y = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(-*self.y.get_value().get()?))?;
 
     cs.enforce(
@@ -142,10 +142,10 @@ where
   }
 
   /// Add two points (may be equal)
-  pub fn add<CS: ConstraintSystem<E::Base>>(
+  pub fn add<CS: ConstraintSystem<E::Base, NumSplits>>(
     &self,
     mut cs: CS,
-    other: &AllocatedPoint<E>,
+    other: &AllocatedPoint<E, NumSplits>,
   ) -> Result<Self, SynthesisError> {
     // Compute boolean equal indicating if self = other
 
@@ -191,10 +191,10 @@ where
 
   /// Adds other point to this point and returns the result. Assumes that the two points are
   /// different and that both `other.is_infinity` and `this.is_infinity` are bits
-  pub fn add_internal<CS: ConstraintSystem<E::Base>>(
+  pub fn add_internal<CS: ConstraintSystem<E::Base, NumSplits>>(
     &self,
     mut cs: CS,
-    other: &AllocatedPoint<E>,
+    other: &AllocatedPoint<E, NumSplits>,
     equal_x: &AllocatedBit,
   ) -> Result<Self, SynthesisError> {
     //************************************************************************/
@@ -354,7 +354,7 @@ where
   }
 
   /// Doubles the supplied point.
-  pub fn double<CS: ConstraintSystem<E::Base>>(&self, mut cs: CS) -> Result<Self, SynthesisError> {
+  pub fn double<CS: ConstraintSystem<E::Base, NumSplits>>(&self, mut cs: CS) -> Result<Self, SynthesisError> {
     //*************************************************************/
     // lambda = (E::Base::from(3) * self.x * self.x + E::GE::A())
     //  * (E::Base::from(2)) * self.y).invert().unwrap();
@@ -458,7 +458,7 @@ where
   /// A gadget for scalar multiplication, optimized to use incomplete addition law.
   /// The optimization here is analogous to <https://github.com/arkworks-rs/r1cs-std/blob/6d64f379a27011b3629cf4c9cb38b7b7b695d5a0/src/groups/curves/short_weierstrass/mod.rs#L295>,
   /// except we use complete addition law over affine coordinates instead of projective coordinates for the tail bits
-  pub fn scalar_mul<CS: ConstraintSystem<E::Base>>(
+  pub fn scalar_mul<CS: ConstraintSystem<E::Base, NumSplits>>(
     &self,
     mut cs: CS,
     scalar_bits: &[AllocatedBit],
@@ -547,7 +547,7 @@ where
   }
 
   /// If condition outputs a otherwise outputs b
-  pub fn conditionally_select<CS: ConstraintSystem<E::Base>>(
+  pub fn conditionally_select<CS: ConstraintSystem<E::Base, NumSplits>>(
     mut cs: CS,
     a: &Self,
     b: &Self,
@@ -568,7 +568,7 @@ where
   }
 
   /// If condition outputs a otherwise infinity
-  pub fn select_point_or_infinity<CS: ConstraintSystem<E::Base>>(
+  pub fn select_point_or_infinity<CS: ConstraintSystem<E::Base, NumSplits>>(
     mut cs: CS,
     a: &Self,
     condition: &Boolean,
@@ -589,22 +589,22 @@ where
 
 #[derive(Clone)]
 /// `AllocatedPoint` but one that is guaranteed to be not infinity
-pub struct AllocatedPointNonInfinity<E: Engine> {
-  x: AllocatedNum<E::Base>,
-  y: AllocatedNum<E::Base>,
+pub struct AllocatedPointNonInfinity<E: Engine, const NumSplits: usize> {
+  x: AllocatedNum<E::Base, NumSplits>,
+  y: AllocatedNum<E::Base, NumSplits>,
 }
 
-impl<E> AllocatedPointNonInfinity<E>
+impl<E, const NumSplits: usize> AllocatedPointNonInfinity<E, NumSplits>
 where
   E: Engine,
 {
   /// Creates a new `AllocatedPointNonInfinity` from the specified coordinates
-  pub const fn new(x: AllocatedNum<E::Base>, y: AllocatedNum<E::Base>) -> Self {
+  pub const fn new(x: AllocatedNum<E::Base, NumSplits>, y: AllocatedNum<E::Base, NumSplits>) -> Self {
     Self { x, y }
   }
 
   /// Allocates a new point on the curve using coordinates provided by `coords`.
-  pub fn alloc<CS: ConstraintSystem<E::Base>>(
+  pub fn alloc<CS: ConstraintSystem<E::Base, NumSplits>>(
     mut cs: CS,
     coords: Option<(E::Base, E::Base)>,
   ) -> Result<Self, SynthesisError> {
@@ -619,7 +619,7 @@ where
   }
 
   /// Turns an `AllocatedPoint` into an `AllocatedPointNonInfinity` (assumes it is not infinity)
-  pub fn from_allocated_point(p: &AllocatedPoint<E>) -> Self {
+  pub fn from_allocated_point(p: &AllocatedPoint<E, NumSplits>) -> Self {
     Self {
       x: p.x.clone(),
       y: p.y.clone(),
@@ -629,8 +629,8 @@ where
   /// Returns an `AllocatedPoint` from an `AllocatedPointNonInfinity`
   pub fn to_allocated_point(
     &self,
-    is_infinity: &AllocatedNum<E::Base>,
-  ) -> Result<AllocatedPoint<E>, SynthesisError> {
+    is_infinity: &AllocatedNum<E::Base, NumSplits>,
+  ) -> Result<AllocatedPoint<E, NumSplits>, SynthesisError> {
     Ok(AllocatedPoint {
       x: self.x.clone(),
       y: self.y.clone(),
@@ -639,14 +639,14 @@ where
   }
 
   /// Returns coordinates associated with the point.
-  pub const fn get_coordinates(&self) -> (&AllocatedNum<E::Base>, &AllocatedNum<E::Base>) {
+  pub const fn get_coordinates(&self) -> (&AllocatedNum<E::Base, NumSplits>, &AllocatedNum<E::Base, NumSplits>) {
     (&self.x, &self.y)
   }
 
   /// Add two points assuming self != +/- other
   pub fn add_incomplete<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
   where
-    CS: ConstraintSystem<E::Base>,
+    CS: ConstraintSystem<E::Base, NumSplits>,
   {
     // allocate a free variable that an honest prover sets to lambda = (y2-y1)/(x2-x1)
     let lambda = AllocatedNum::alloc(cs.namespace(|| "lambda"), || {
@@ -706,7 +706,7 @@ where
   }
 
   /// doubles the point; since this is called with a point not at infinity, it is guaranteed to be not infinity
-  pub fn double_incomplete<CS: ConstraintSystem<E::Base>>(
+  pub fn double_incomplete<CS: ConstraintSystem<E::Base, NumSplits>>(
     &self,
     mut cs: CS,
   ) -> Result<Self, SynthesisError> {
@@ -763,7 +763,7 @@ where
   }
 
   /// If condition outputs a otherwise outputs b
-  pub fn conditionally_select<CS: ConstraintSystem<E::Base>>(
+  pub fn conditionally_select<CS: ConstraintSystem<E::Base, NumSplits>>(
     mut cs: CS,
     a: &Self,
     b: &Self,

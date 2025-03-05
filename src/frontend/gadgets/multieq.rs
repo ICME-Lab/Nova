@@ -3,15 +3,15 @@ use ff::PrimeField;
 use crate::frontend::{ConstraintSystem, LinearCombination, SynthesisError, Variable};
 
 #[derive(Debug)]
-pub struct MultiEq<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> {
+pub struct MultiEq<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> {
   cs: CS,
   ops: usize,
   bits_used: usize,
-  lhs: LinearCombination<Scalar>,
-  rhs: LinearCombination<Scalar>,
+  lhs: LinearCombination<Scalar, NumSplits>,
+  rhs: LinearCombination<Scalar, NumSplits>,
 }
 
-impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> MultiEq<Scalar, CS> {
+impl<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> MultiEq<Scalar, NumSplits, CS> {
   pub fn new(cs: CS) -> Self {
     MultiEq {
       cs,
@@ -41,8 +41,8 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> MultiEq<Scalar, CS> {
   pub fn enforce_equal(
     &mut self,
     num_bits: usize,
-    lhs: &LinearCombination<Scalar>,
-    rhs: &LinearCombination<Scalar>,
+    lhs: &LinearCombination<Scalar, NumSplits>,
+    rhs: &LinearCombination<Scalar, NumSplits>,
   ) {
     // Check if we will exceed the capacity
     if (Scalar::CAPACITY as usize) <= (self.bits_used + num_bits) {
@@ -58,7 +58,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> MultiEq<Scalar, CS> {
   }
 }
 
-impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> Drop for MultiEq<Scalar, CS> {
+impl<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> Drop for MultiEq<Scalar, NumSplits, CS> {
   fn drop(&mut self) {
     if self.bits_used > 0 {
       self.accumulate();
@@ -66,8 +66,8 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> Drop for MultiEq<Scalar, 
   }
 }
 
-impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
-  for MultiEq<Scalar, CS>
+impl<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> ConstraintSystem<Scalar, NumSplits>
+  for MultiEq<Scalar, NumSplits, CS>
 {
   type Root = Self;
 
@@ -93,13 +93,22 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     self.cs.alloc_input(annotation, f)
   }
 
+  fn alloc_precommitted<F, A, AR>(&mut self, annotation: A, f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.cs.alloc_precommitted(annotation, f, idx)
+  }
+
   fn enforce<A, AR, LA, LB, LC>(&mut self, annotation: A, a: LA, b: LB, c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+    LA: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
   {
     self.cs.enforce(annotation, a, b, c)
   }

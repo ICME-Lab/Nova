@@ -5,7 +5,7 @@ use ff::PrimeField;
 use crate::frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
 
 /// A [`ConstraintSystem`] trait
-pub trait SizedWitness<Scalar: PrimeField> {
+pub trait SizedWitness<Scalar: PrimeField, const NumSplits: usize> {
   /// Returns the number of constraints in the constraint system
   fn num_constraints(&self) -> usize;
   /// Returns the number of inputs in the constraint system
@@ -17,7 +17,7 @@ pub trait SizedWitness<Scalar: PrimeField> {
   fn generate_witness_into(&mut self, aux: &mut [Scalar], inputs: &mut [Scalar]) -> Scalar;
 
   /// Generate a witness for the constraint system
-  fn generate_witness_into_cs<CS: ConstraintSystem<Scalar>>(&mut self, cs: &mut CS) -> Scalar {
+  fn generate_witness_into_cs<CS: ConstraintSystem<Scalar, NumSplits>>(&mut self, cs: &mut CS) -> Scalar {
     assert!(cs.is_witness_generator());
 
     let aux_count = self.num_aux();
@@ -34,16 +34,17 @@ pub trait SizedWitness<Scalar: PrimeField> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A `ConstraintSystem` which calculates witness values for a concrete instance of an R1CS circuit.
-pub struct WitnessCS<Scalar>
+pub struct WitnessCS<Scalar, const NumSplits: usize>
 where
   Scalar: PrimeField,
 {
   // Assignments of variables
   pub(crate) input_assignment: Vec<Scalar>,
   pub(crate) aux_assignment: Vec<Scalar>,
+  pub(crate) precommitted_assignment: [Vec<Scalar>; NumSplits],
 }
 
-impl<Scalar> WitnessCS<Scalar>
+impl<Scalar, const NumSplits: usize> WitnessCS<Scalar, NumSplits>
 where
   Scalar: PrimeField,
 {
@@ -56,9 +57,14 @@ where
   pub fn aux_assignment(&self) -> &[Scalar] {
     &self.aux_assignment
   }
+
+  /// Get precommitted assignment
+  pub fn precommitted_assignment(&self) -> &[Vec<Scalar>; NumSplits] {
+    &self.precommitted_assignment
+  }
 }
 
-impl<Scalar> ConstraintSystem<Scalar> for WitnessCS<Scalar>
+impl<Scalar, const NumSplits: usize> ConstraintSystem<Scalar, NumSplits> for WitnessCS<Scalar, NumSplits>
 where
   Scalar: PrimeField,
 {
@@ -70,6 +76,11 @@ where
     Self {
       input_assignment,
       aux_assignment: vec![],
+      precommitted_assignment: {
+        let mut precommitted = Vec::with_capacity(NumSplits);
+        precommitted.resize_with(NumSplits, Vec::new);
+        precommitted.try_into().unwrap()
+      },
     }
   }
 
@@ -95,13 +106,27 @@ where
     Ok(Variable(Index::Input(self.input_assignment.len() - 1)))
   }
 
+  fn alloc_precommitted<F, A, AR>(&mut self, _: A, f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    assert!(idx < NumSplits, "Index out of bounds for precommitted_assignment");
+
+    let precommitted_assignment = &mut self.precommitted_assignment[idx];
+    precommitted_assignment.push(f()?);
+
+    Ok(Variable(Index::Precommitted((idx, precommitted_assignment.len() - 1))))
+  }
+
   fn enforce<A, AR, LA, LB, LC>(&mut self, _: A, _a: LA, _b: LB, _c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+    LA: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
   {
     // Do nothing: we don't care about linear-combination evaluations in this context.
   }

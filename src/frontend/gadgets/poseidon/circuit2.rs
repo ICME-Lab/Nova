@@ -16,32 +16,32 @@ use std::marker::PhantomData;
 /// Similar to `num::Num`, we use `Elt` to accumulate both values and linear combinations, then eventually
 /// extract into a `num::AllocatedNum`, enforcing that the linear combination corresponds to the result.
 #[derive(Clone)]
-pub enum Elt<Scalar: PrimeField> {
+pub enum Elt<Scalar: PrimeField, const NumSplits: usize> {
   /// [`AllocatedNum`] variant
-  Allocated(AllocatedNum<Scalar>),
+  Allocated(AllocatedNum<Scalar, NumSplits>),
   /// [`num::Num`] variant
-  Num(num::Num<Scalar>),
+  Num(num::Num<Scalar, NumSplits>),
 }
 
-impl<Scalar: PrimeField> From<AllocatedNum<Scalar>> for Elt<Scalar> {
-  fn from(allocated: AllocatedNum<Scalar>) -> Self {
+impl<Scalar: PrimeField, const NumSplits: usize> From<AllocatedNum<Scalar, NumSplits>> for Elt<Scalar, NumSplits> {
+  fn from(allocated: AllocatedNum<Scalar, NumSplits>) -> Self {
     Self::Allocated(allocated)
   }
 }
 
-impl<Scalar: PrimeField> Elt<Scalar> {
+impl<Scalar: PrimeField, const NumSplits: usize> Elt<Scalar, NumSplits> {
   /// Create an Elt from a [`Scalar`].
-  pub fn num_from_fr<CS: ConstraintSystem<Scalar>>(fr: Scalar) -> Self {
-    let num = num::Num::<Scalar>::zero();
+  pub fn num_from_fr<CS: ConstraintSystem<Scalar, NumSplits>>(fr: Scalar) -> Self {
+    let num = num::Num::<Scalar, NumSplits>::zero();
     Self::Num(num.add_bool_with_coeff(CS::one(), &Boolean::Constant(true), fr))
   }
 
   /// Ensure Elt is allocated.
-  pub fn ensure_allocated<CS: ConstraintSystem<Scalar>>(
+  pub fn ensure_allocated<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     cs: &mut CS,
     enforce: bool,
-  ) -> Result<AllocatedNum<Scalar>, SynthesisError> {
+  ) -> Result<AllocatedNum<Scalar, NumSplits>, SynthesisError> {
     match self {
       Self::Allocated(v) => Ok(v.clone()),
       Self::Num(num) => {
@@ -71,16 +71,16 @@ impl<Scalar: PrimeField> Elt<Scalar> {
   }
 
   /// Get the [`LinearCombination`]  of the Elt.
-  pub fn lc(&self) -> LinearCombination<Scalar> {
+  pub fn lc(&self) -> LinearCombination<Scalar, NumSplits> {
     match self {
       Self::Num(num) => num.lc(Scalar::ONE),
-      Self::Allocated(v) => LinearCombination::<Scalar>::zero() + v.get_variable(),
+      Self::Allocated(v) => LinearCombination::<Scalar, NumSplits>::zero() + v.get_variable(),
     }
   }
 
   /// Add two Elts and return Elt::Num tracking the calculation.
   #[allow(clippy::should_implement_trait)]
-  pub fn add(self, other: Elt<Scalar>) -> Result<Elt<Scalar>, SynthesisError> {
+  pub fn add(self, other: Elt<Scalar, NumSplits>) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
     match (self, other) {
       (Elt::Num(a), Elt::Num(b)) => Ok(Elt::Num(a.add(&b))),
       (a, b) => Ok(Elt::Num(a.num().add(&b.num()))),
@@ -88,7 +88,7 @@ impl<Scalar: PrimeField> Elt<Scalar> {
   }
 
   /// Add two Elts and return Elt::Num tracking the calculation.
-  pub fn add_ref(self, other: &Elt<Scalar>) -> Result<Elt<Scalar>, SynthesisError> {
+  pub fn add_ref(self, other: &Elt<Scalar, NumSplits>) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
     match (self, other) {
       (Elt::Num(a), Elt::Num(b)) => Ok(Elt::Num(a.add(b))),
       (a, b) => Ok(Elt::Num(a.num().add(&b.num()))),
@@ -96,10 +96,10 @@ impl<Scalar: PrimeField> Elt<Scalar> {
   }
 
   /// Scale
-  pub fn scale<CS: ConstraintSystem<Scalar>>(
+  pub fn scale<CS: ConstraintSystem<Scalar, NumSplits>>(
     self,
     scalar: Scalar,
-  ) -> Result<Elt<Scalar>, SynthesisError> {
+  ) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
     match self {
       Elt::Num(num) => Ok(Elt::Num(num.scale(scalar))),
       Elt::Allocated(a) => Elt::Num(a.into()).scale::<CS>(scalar),
@@ -107,10 +107,10 @@ impl<Scalar: PrimeField> Elt<Scalar> {
   }
 
   /// Square
-  pub fn square<CS: ConstraintSystem<Scalar>>(
+  pub fn square<CS: ConstraintSystem<Scalar, NumSplits>>(
     &self,
     mut cs: CS,
-  ) -> Result<AllocatedNum<Scalar>, SynthesisError> {
+  ) -> Result<AllocatedNum<Scalar, NumSplits>, SynthesisError> {
     match self {
       Elt::Num(num) => {
         let allocated = AllocatedNum::alloc(&mut cs.namespace(|| "squared num"), || {
@@ -132,7 +132,7 @@ impl<Scalar: PrimeField> Elt<Scalar> {
   }
 
   /// Return inner Num.
-  pub fn num(&self) -> num::Num<Scalar> {
+  pub fn num(&self) -> num::Num<Scalar, NumSplits> {
     match self {
       Elt::Num(num) => num.clone(),
       Elt::Allocated(a) => a.clone().into(),
@@ -141,14 +141,14 @@ impl<Scalar: PrimeField> Elt<Scalar> {
 }
 
 /// Circuit for Poseidon hash.
-pub struct PoseidonCircuit2<'a, Scalar, A>
+pub struct PoseidonCircuit2<'a, Scalar, A, const NumSplits: usize>
 where
   Scalar: PrimeField,
   A: Arity<Scalar>,
 {
   constants_offset: usize,
   width: usize,
-  pub(crate) elements: Vec<Elt<Scalar>>,
+  pub(crate) elements: Vec<Elt<Scalar, NumSplits>>,
   pub(crate) pos: usize,
   current_round: usize,
   constants: &'a PoseidonConstants<Scalar, A>,
@@ -156,13 +156,13 @@ where
 }
 
 /// PoseidonCircuit2 implementation.
-impl<'a, Scalar, A> PoseidonCircuit2<'a, Scalar, A>
+impl<'a, Scalar, A, const NumSplits: usize> PoseidonCircuit2<'a, Scalar, A, NumSplits>
 where
   Scalar: PrimeField,
   A: Arity<Scalar>,
 {
   /// Create a new Poseidon hasher for `preimage`.
-  pub fn new(elements: Vec<Elt<Scalar>>, constants: &'a PoseidonConstants<Scalar, A>) -> Self {
+  pub fn new(elements: Vec<Elt<Scalar, NumSplits>>, constants: &'a PoseidonConstants<Scalar, A>) -> Self {
     let width = constants.width();
 
     PoseidonCircuit2 {
@@ -176,17 +176,17 @@ where
     }
   }
 
-  pub fn new_empty<CS: ConstraintSystem<Scalar>>(
+  pub fn new_empty<CS: ConstraintSystem<Scalar, NumSplits>>(
     constants: &'a PoseidonConstants<Scalar, A>,
   ) -> Self {
     let elements = Self::initial_elements::<CS>();
     Self::new(elements, constants)
   }
 
-  pub fn hash<CS: ConstraintSystem<Scalar>>(
+  pub fn hash<CS: ConstraintSystem<Scalar, NumSplits>>(
     &mut self,
     cs: &mut CS,
-  ) -> Result<Elt<Scalar>, SynthesisError> {
+  ) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
     self.full_round(cs.namespace(|| "first round"), true, false)?;
 
     for i in 1..self.constants.full_rounds / 2 {
@@ -216,7 +216,7 @@ where
     Ok(elt)
   }
 
-  pub fn apply_padding<CS: ConstraintSystem<Scalar>>(&mut self) {
+  pub fn apply_padding<CS: ConstraintSystem<Scalar, NumSplits>>(&mut self) {
     if let HashType::ConstantLength(l) = self.constants.hash_type {
       let final_pos = 1 + (l % self.constants.arity());
 
@@ -237,7 +237,7 @@ where
     }
   }
 
-  fn full_round<CS: ConstraintSystem<Scalar>>(
+  fn full_round<CS: ConstraintSystem<Scalar, NumSplits>>(
     &mut self,
     mut cs: CS,
     first_round: bool,
@@ -303,7 +303,7 @@ where
     Ok(())
   }
 
-  fn partial_round<CS: ConstraintSystem<Scalar>>(
+  fn partial_round<CS: ConstraintSystem<Scalar, NumSplits>>(
     &mut self,
     mut cs: CS,
   ) -> Result<(), SynthesisError> {
@@ -321,14 +321,14 @@ where
     Ok(())
   }
 
-  fn product_mds_m<CS: ConstraintSystem<Scalar>>(&mut self) -> Result<(), SynthesisError> {
+  fn product_mds_m<CS: ConstraintSystem<Scalar, NumSplits>>(&mut self) -> Result<(), SynthesisError> {
     self.product_mds_with_matrix::<CS>(&self.constants.mds_matrices.m)
   }
 
   /// Set the provided elements with the result of the product between the elements and the appropriate
   /// MDS matrix.
   #[allow(clippy::collapsible_else_if)]
-  fn product_mds<CS: ConstraintSystem<Scalar>>(&mut self) -> Result<(), SynthesisError> {
+  fn product_mds<CS: ConstraintSystem<Scalar, NumSplits>>(&mut self) -> Result<(), SynthesisError> {
     let full_half = self.constants.half_full_rounds;
     let sparse_offset = full_half - 1;
     if self.current_round == sparse_offset {
@@ -351,18 +351,18 @@ where
   }
 
   #[allow(clippy::ptr_arg)]
-  fn product_mds_with_matrix<CS: ConstraintSystem<Scalar>>(
+  fn product_mds_with_matrix<CS: ConstraintSystem<Scalar, NumSplits>>(
     &mut self,
     matrix: &Matrix<Scalar>,
   ) -> Result<(), SynthesisError> {
-    let mut result: Vec<Elt<Scalar>> = Vec::with_capacity(self.constants.width());
+    let mut result: Vec<Elt<Scalar, NumSplits>> = Vec::with_capacity(self.constants.width());
 
     for j in 0..self.constants.width() {
       let column = (0..self.constants.width())
         .map(|i| matrix[i][j])
         .collect::<Vec<_>>();
 
-      let product = scalar_product::<Scalar, CS>(self.elements.as_slice(), &column)?;
+      let product = scalar_product::<Scalar, NumSplits, CS>(self.elements.as_slice(), &column)?;
 
       result.push(product);
     }
@@ -373,13 +373,13 @@ where
   }
 
   // Sparse matrix in this context means one of the form, M''.
-  fn product_mds_with_sparse_matrix<CS: ConstraintSystem<Scalar>>(
+  fn product_mds_with_sparse_matrix<CS: ConstraintSystem<Scalar, NumSplits>>(
     &mut self,
     matrix: &SparseMatrix<Scalar>,
   ) -> Result<(), SynthesisError> {
-    let mut result: Vec<Elt<Scalar>> = Vec::with_capacity(self.constants.width());
+    let mut result: Vec<Elt<Scalar, NumSplits>> = Vec::with_capacity(self.constants.width());
 
-    result.push(scalar_product::<Scalar, CS>(
+    result.push(scalar_product::<Scalar, NumSplits, CS>(
       self.elements.as_slice(),
       &matrix.w_hat,
     )?);
@@ -397,7 +397,7 @@ where
     Ok(())
   }
 
-  fn initial_elements<CS: ConstraintSystem<Scalar>>() -> Vec<Elt<Scalar>> {
+  fn initial_elements<CS: ConstraintSystem<Scalar, NumSplits>>() -> Vec<Elt<Scalar, NumSplits>> {
     std::iter::repeat(Elt::num_from_fr::<CS>(Scalar::ZERO))
       .take(A::to_usize() + 1)
       .collect()
@@ -411,11 +411,11 @@ where
 }
 
 /// Compute l^5 and enforce constraint. If round_key is supplied, add it to result.
-fn quintic_s_box<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
+fn quintic_s_box<CS: ConstraintSystem<Scalar, NumSplits>, Scalar: PrimeField, const NumSplits: usize>(
   mut cs: CS,
-  l: &Elt<Scalar>,
+  l: &Elt<Scalar, NumSplits>,
   post_round_key: Option<Scalar>,
-) -> Result<Elt<Scalar>, SynthesisError> {
+) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
   // If round_key was supplied, add it after all exponentiation.
   let l2 = l.square(cs.namespace(|| "l^2"))?;
   let l4 = l2.square(cs.namespace(|| "l^4"))?;
@@ -432,12 +432,12 @@ fn quintic_s_box<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
 }
 
 /// Compute l^5 and enforce constraint. If round_key is supplied, add it to l first.
-fn quintic_s_box_pre_add<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
+fn quintic_s_box_pre_add<CS: ConstraintSystem<Scalar, NumSplits>, Scalar: PrimeField, const NumSplits: usize>(
   mut cs: CS,
-  l: &Elt<Scalar>,
+  l: &Elt<Scalar, NumSplits>,
   pre_round_key: Option<Scalar>,
   post_round_key: Option<Scalar>,
-) -> Result<Elt<Scalar>, SynthesisError> {
+) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
   if let (Some(pre_round_key), Some(post_round_key)) = (pre_round_key, post_round_key) {
     // If round_key was supplied, add it to l before squaring.
     let l2 = square_sum(cs.namespace(|| "(l+rk)^2"), pre_round_key, l, true)?;
@@ -458,12 +458,12 @@ fn quintic_s_box_pre_add<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
 }
 
 /// Calculates square of sum and enforces that constraint.
-pub fn square_sum<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
+pub fn square_sum<CS: ConstraintSystem<Scalar, NumSplits>, Scalar: PrimeField, const NumSplits: usize>(
   mut cs: CS,
   to_add: Scalar,
-  elt: &Elt<Scalar>,
+  elt: &Elt<Scalar, NumSplits>,
   enforce: bool,
-) -> Result<AllocatedNum<Scalar>, SynthesisError> {
+) -> Result<AllocatedNum<Scalar, NumSplits>, SynthesisError> {
   let res = AllocatedNum::alloc(cs.namespace(|| "squared sum"), || {
     let mut tmp = elt.val().ok_or(SynthesisError::AssignmentMissing)?;
     tmp.add_assign(&to_add);
@@ -484,14 +484,14 @@ pub fn square_sum<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
 
 /// Calculates (a * (pre_add + b)) + post_add — and enforces that constraint.
 #[allow(clippy::collapsible_else_if)]
-pub fn mul_sum<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
+pub fn mul_sum<CS: ConstraintSystem<Scalar, NumSplits>, Scalar: PrimeField, const NumSplits: usize>(
   mut cs: CS,
-  a: &AllocatedNum<Scalar>,
-  b: &Elt<Scalar>,
+  a: &AllocatedNum<Scalar, NumSplits>,
+  b: &Elt<Scalar, NumSplits>,
   pre_add: Option<Scalar>,
   post_add: Option<Scalar>,
   enforce: bool,
-) -> Result<AllocatedNum<Scalar>, SynthesisError> {
+) -> Result<AllocatedNum<Scalar, NumSplits>, SynthesisError> {
   let res = AllocatedNum::alloc(cs.namespace(|| "mul_sum"), || {
     let mut tmp = b.val().ok_or(SynthesisError::AssignmentMissing)?;
     if let Some(x) = pre_add {
@@ -545,10 +545,10 @@ pub fn mul_sum<CS: ConstraintSystem<Scalar>, Scalar: PrimeField>(
   Ok(res)
 }
 
-fn scalar_product<Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
-  elts: &[Elt<Scalar>],
+fn scalar_product<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>>(
+  elts: &[Elt<Scalar, NumSplits>],
   scalars: &[Scalar],
-) -> Result<Elt<Scalar>, SynthesisError> {
+) -> Result<Elt<Scalar, NumSplits>, SynthesisError> {
   elts
     .iter()
     .zip(scalars)

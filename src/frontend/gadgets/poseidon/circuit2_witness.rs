@@ -5,7 +5,7 @@ use crate::frontend::util_cs::witness_cs::SizedWitness;
 use ff::PrimeField;
 use generic_array::{sequence::GenericSequence, typenum::Unsigned, GenericArray};
 
-impl<Scalar, A> SizedWitness<Scalar> for Poseidon<'_, Scalar, A>
+impl<Scalar, A, const NumSplits: usize> SizedWitness<Scalar, NumSplits> for Poseidon<'_, Scalar, A>
 where
   Scalar: PrimeField,
   A: Arity<Scalar>,
@@ -21,8 +21,9 @@ where
   }
 
   fn num_aux(&self) -> usize {
-    self.num_constraints()
+    <Poseidon<'_, Scalar, A> as SizedWitness<Scalar, NumSplits>>::num_constraints(self)
   }
+
   fn generate_witness_into(&mut self, aux: &mut [Scalar], _inputs: &mut [Scalar]) -> Scalar {
     let width = A::ConstantsSize::to_usize();
     let constants = self.constants;

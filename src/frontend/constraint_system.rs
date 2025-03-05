@@ -8,9 +8,9 @@ use super::lc::{Index, LinearCombination, Variable};
 /// rank-1 quadratic constraint systems. The `Circuit` trait represents a
 /// circuit that can be synthesized. The `synthesize` method is called during
 /// CRS generation and during proving.
-pub trait Circuit<Scalar: PrimeField> {
+pub trait Circuit<Scalar: PrimeField, const NumSplits: usize> {
   /// Synthesize the circuit into a rank-1 quadratic constraint system.
-  fn synthesize<CS: ConstraintSystem<Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError>;
+  fn synthesize<CS: ConstraintSystem<Scalar, NumSplits>>(self, cs: &mut CS) -> Result<(), SynthesisError>;
 }
 
 /// This is an error that could occur during circuit synthesis contexts,
@@ -55,10 +55,10 @@ pub enum SynthesisError {
 
 /// Represents a constraint system which can have new variables
 /// allocated and constrains between them formed.
-pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
+pub trait ConstraintSystem<Scalar: PrimeField, const NumSplits: usize>: Sized + Send {
   /// Represents the type of the "root" of this constraint system
   /// so that nested namespaces can minimize indirection.
-  type Root: ConstraintSystem<Scalar>;
+  type Root: ConstraintSystem<Scalar, NumSplits>;
 
   /// Create a new empty constraint system
   fn new() -> Self {
@@ -90,15 +90,23 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
     A: FnOnce() -> AR,
     AR: Into<String>;
 
+  /// Allocate a precommitted variable in the constraint system. The provided function is used to
+  /// determine the assignment of the variable.
+  fn alloc_precommitted<F, A, AR>(&mut self, annotation: A, f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>;
+
   /// Enforce that `A` * `B` = `C`. The `annotation` function is invoked in testing contexts
   /// in order to derive a unique name for the constraint in the current namespace.
   fn enforce<A, AR, LA, LB, LC>(&mut self, annotation: A, a: LA, b: LB, c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>;
+    LA: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>;
 
   /// Create a new (sub)namespace and enter into it. Not intended
   /// for downstream use; use `namespace` instead.
@@ -116,7 +124,7 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
   fn get_root(&mut self) -> &mut Self::Root;
 
   /// Begin a namespace for this constraint system.
-  fn namespace<NR, N>(&mut self, name_fn: N) -> Namespace<'_, Scalar, Self::Root>
+  fn namespace<NR, N>(&mut self, name_fn: N) -> Namespace<'_, Scalar, NumSplits, Self::Root>
   where
     NR: Into<String>,
     N: FnOnce() -> NR,
@@ -233,13 +241,13 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
 /// This is a "namespaced" constraint system which borrows a constraint system (pushing
 /// a namespace context) and, when dropped, pops out of the namespace context.
 #[derive(Debug)]
-pub struct Namespace<'a, Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
+pub struct Namespace<'a, Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>>(
   &'a mut CS,
   PhantomData<Scalar>,
 );
 
-impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
-  for Namespace<'_, Scalar, CS>
+impl<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> ConstraintSystem<Scalar, NumSplits>
+  for Namespace<'_, Scalar, NumSplits, CS>
 {
   type Root = CS::Root;
 
@@ -265,13 +273,22 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     self.0.alloc_input(annotation, f)
   }
 
+  fn alloc_precommitted<F, A, AR>(&mut self, annotation: A, f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.0.alloc_precommitted(annotation, f, idx)
+  }
+
   fn enforce<A, AR, LA, LB, LC>(&mut self, annotation: A, a: LA, b: LB, c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+    LA: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
   {
     self.0.enforce(annotation, a, b, c)
   }
@@ -320,15 +337,15 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
   }
 }
 
-impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> Drop for Namespace<'_, Scalar, CS> {
+impl<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> Drop for Namespace<'_, Scalar, NumSplits, CS> {
   fn drop(&mut self) {
     self.get_root().pop_namespace()
   }
 }
 
-/// Convenience implementation of ConstraintSystem<Scalar> for mutable references to
+/// Convenience implementation of ConstraintSystem<Scalar, NumSplits> for mutable references to
 /// constraint systems.
-impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> for &'_ mut CS {
+impl<Scalar: PrimeField, const NumSplits: usize, CS: ConstraintSystem<Scalar, NumSplits>> ConstraintSystem<Scalar, NumSplits> for &'_ mut CS {
   type Root = CS::Root;
 
   fn one() -> Variable {
@@ -353,13 +370,22 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
     (**self).alloc_input(annotation, f)
   }
 
+  fn alloc_precommitted<F, A, AR>(&mut self, annotation: A, f: F, idx: usize) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    (**self).alloc_precommitted(annotation, f, idx)
+  }
+
   fn enforce<A, AR, LA, LB, LC>(&mut self, annotation: A, a: LA, b: LB, c: LC)
   where
     A: FnOnce() -> AR,
     AR: Into<String>,
-    LA: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LB: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
-    LC: FnOnce(LinearCombination<Scalar>) -> LinearCombination<Scalar>,
+    LA: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LB: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
+    LC: FnOnce(LinearCombination<Scalar, NumSplits>) -> LinearCombination<Scalar, NumSplits>,
   {
     (**self).enforce(annotation, a, b, c)
   }
@@ -380,7 +406,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
     (**self).get_root()
   }
 
-  fn namespace<NR, N>(&mut self, name_fn: N) -> Namespace<'_, Scalar, Self::Root>
+  fn namespace<NR, N>(&mut self, name_fn: N) -> Namespace<'_, Scalar, NumSplits, Self::Root>
   where
     NR: Into<String>,
     N: FnOnce() -> NR,
