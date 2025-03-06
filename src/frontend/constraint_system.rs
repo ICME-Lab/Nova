@@ -1,6 +1,7 @@
 use std::{io, marker::PhantomData};
 
 use ff::PrimeField;
+use serde::{Deserialize, Serialize};
 
 use super::lc::{Index, LinearCombination, Variable};
 
@@ -85,6 +86,21 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
   /// Allocate a public variable in the constraint system. The provided function is used to
   /// determine the assignment of the variable.
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>;
+
+  /// Allocate a precommitted variable in the constraint system. The provided function is used to
+  /// determine the assignment of the variable. The given `annotation` function is invoked
+  /// in testing contexts in order to derive a unique name for this variable in the current
+  /// namespace.
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    annotation: A,
+    f: F,
+    idx: Split,
+  ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
     A: FnOnce() -> AR,
@@ -256,6 +272,20 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     self.0.alloc(annotation, f)
   }
 
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    annotation: A,
+    f: F,
+    idx: Split,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.0.alloc_precommitted(annotation, f, idx)
+  }
+
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -344,6 +374,20 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
     (**self).alloc(annotation, f)
   }
 
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    annotation: A,
+    f: F,
+    idx: Split,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    (**self).alloc_precommitted(annotation, f, idx)
+  }
+
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -426,5 +470,23 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
 
   fn aux_slice(&self) -> &[Scalar] {
     (**self).aux_slice()
+  }
+}
+
+#[derive(Copy, Clone, PartialEq, Debug, Eq, Hash, Serialize, Deserialize)]
+/// Determines which precommited value to store
+pub enum Split {
+  /// Store the first precommitted value
+  First,
+  /// Store the second precommitted value
+  Second,
+}
+
+impl Split {
+  pub fn is_first(&self) -> bool {
+    match self {
+      Split::First => true,
+      Split::Second => false,
+    }
   }
 }

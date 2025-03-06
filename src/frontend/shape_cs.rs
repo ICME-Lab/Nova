@@ -6,6 +6,8 @@ use crate::{
 };
 use ff::PrimeField;
 
+use super::constraint_system::Split;
+
 /// `ShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
 pub struct ShapeCS<E: Engine>
 where
@@ -19,6 +21,7 @@ where
   )>,
   inputs: usize,
   aux: usize,
+  precommitted: (usize, usize),
 }
 
 impl<E: Engine> ShapeCS<E> {
@@ -41,6 +44,11 @@ impl<E: Engine> ShapeCS<E> {
   pub fn num_aux(&self) -> usize {
     self.aux
   }
+
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> (usize, usize) {
+    self.precommitted
+  }
 }
 
 impl<E: Engine> Default for ShapeCS<E> {
@@ -49,6 +57,7 @@ impl<E: Engine> Default for ShapeCS<E> {
       constraints: vec![],
       inputs: 1,
       aux: 0,
+      precommitted: (0, 0),
     }
   }
 }
@@ -91,6 +100,28 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     let c = c(LinearCombination::zero());
 
     self.constraints.push((a, b, c));
+  }
+
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _annotation: A,
+    _f: F,
+    idx: Split,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    let precommitted = match idx {
+      Split::First => &mut self.precommitted.0,
+      Split::Second => &mut self.precommitted.1,
+    };
+    *precommitted += 1;
+    Ok(Variable::new_unchecked(Index::Precommitted(
+      *precommitted - 1,
+      idx,
+    )))
   }
 
   fn push_namespace<NR, N>(&mut self, _name_fn: N)

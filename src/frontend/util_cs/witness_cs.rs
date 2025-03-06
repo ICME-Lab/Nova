@@ -2,7 +2,9 @@
 
 use ff::PrimeField;
 
-use crate::frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
+use crate::frontend::{
+  constraint_system::Split, ConstraintSystem, Index, LinearCombination, SynthesisError, Variable,
+};
 
 /// A [`ConstraintSystem`] trait
 pub trait SizedWitness<Scalar: PrimeField> {
@@ -41,6 +43,7 @@ where
   // Assignments of variables
   pub(crate) input_assignment: Vec<Scalar>,
   pub(crate) aux_assignment: Vec<Scalar>,
+  pub(crate) precommitted_assignment: [Vec<Scalar>; 2],
 }
 
 impl<Scalar> WitnessCS<Scalar>
@@ -70,6 +73,7 @@ where
     Self {
       input_assignment,
       aux_assignment: vec![],
+      precommitted_assignment: [vec![], vec![]],
     }
   }
 
@@ -93,6 +97,25 @@ where
     self.input_assignment.push(f()?);
 
     Ok(Variable(Index::Input(self.input_assignment.len() - 1)))
+  }
+
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _: A,
+    f: F,
+    idx: Split,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    let assignment = match idx {
+      Split::First => &mut self.precommitted_assignment[0],
+      Split::Second => &mut self.precommitted_assignment[1],
+    };
+    assignment.push(f()?);
+    Ok(Variable(Index::Precommitted(assignment.len() - 1, idx)))
   }
 
   fn enforce<A, AR, LA, LB, LC>(&mut self, _: A, _a: LA, _b: LB, _c: LC)
