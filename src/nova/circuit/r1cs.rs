@@ -13,7 +13,10 @@ use crate::{
       conditionally_select_bignat, le_bits_to_num,
     },
   },
-  r1cs::{R1CSInstance, RelaxedR1CSInstance},
+  r1cs::{
+    split::{SplitR1CSInstance, SplitRelaxedR1CSInstance},
+    R1CSInstance, RelaxedR1CSInstance,
+  },
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
 };
 use ff::Field;
@@ -24,24 +27,43 @@ pub struct AllocatedR1CSInstance<E: Engine> {
   pub(crate) W: AllocatedPoint<E>,
   pub(crate) X0: AllocatedNum<E::Base>,
   pub(crate) X1: AllocatedNum<E::Base>,
+  pub(crate) precommit0: AllocatedPoint<E>,
+  pub(crate) precommit1: AllocatedPoint<E>,
 }
 
 impl<E: Engine> AllocatedR1CSInstance<E> {
   /// Takes the r1cs instance and creates a new allocated r1cs instance
   pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
     mut cs: CS,
-    u: Option<&R1CSInstance<E>>,
+    u: Option<&SplitR1CSInstance<E>>,
   ) -> Result<Self, SynthesisError> {
     let W = AllocatedPoint::alloc(
       cs.namespace(|| "allocate W"),
-      u.map(|u| u.comm_W.to_coordinates()),
+      u.map(|u| u.aux.comm_W.to_coordinates()),
     )?;
     W.check_on_curve(cs.namespace(|| "check W on curve"))?;
 
-    let X0 = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate X[0]"), u.map(|u| u.X[0]))?;
-    let X1 = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate X[1]"), u.map(|u| u.X[1]))?;
+    let X0 = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate X[0]"), u.map(|u| u.aux.X[0]))?;
+    let X1 = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate X[1]"), u.map(|u| u.aux.X[1]))?;
 
-    Ok(AllocatedR1CSInstance { W, X0, X1 })
+    let precommit0 = AllocatedPoint::alloc(
+      cs.namespace(|| "allocate pre_commit_0"),
+      u.map(|u| u.precommitted.0.to_coordinates()),
+    )?;
+    precommit0.check_on_curve(cs.namespace(|| "check pre_commit_0 on curve"))?;
+    let precommit1 = AllocatedPoint::alloc(
+      cs.namespace(|| "allocate pre_commit_1"),
+      u.map(|u| u.precommitted.1.to_coordinates()),
+    )?;
+    precommit1.check_on_curve(cs.namespace(|| "check pre_commit_1 on curve"))?;
+
+    Ok(AllocatedR1CSInstance {
+      W,
+      X0,
+      X1,
+      precommit0,
+      precommit1,
+    })
   }
 
   /// Absorb the provided instance in the RO
@@ -61,13 +83,15 @@ pub struct AllocatedRelaxedR1CSInstance<E: Engine> {
   pub(crate) u: AllocatedNum<E::Base>,
   pub(crate) X0: BigNat<E::Base>,
   pub(crate) X1: BigNat<E::Base>,
+  pub(crate) precommit0: AllocatedPoint<E>,
+  pub(crate) precommit1: AllocatedPoint<E>,
 }
 
 impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
   /// Allocates the given `RelaxedR1CSInstance` as a witness of the circuit
   pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
     mut cs: CS,
-    inst: Option<&RelaxedR1CSInstance<E>>,
+    inst: Option<&SplitRelaxedR1CSInstance<E>>,
     limb_width: usize,
     n_limbs: usize,
   ) -> Result<Self, SynthesisError> {
@@ -76,34 +100,60 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
     // came from a prior iteration of Nova.
     let W = AllocatedPoint::alloc(
       cs.namespace(|| "allocate W"),
-      inst.map(|inst| inst.comm_W.to_coordinates()),
+      inst.map(|inst| inst.aux.comm_W.to_coordinates()),
     )?;
 
     let E = AllocatedPoint::alloc(
       cs.namespace(|| "allocate E"),
-      inst.map(|inst| inst.comm_E.to_coordinates()),
+      inst.map(|inst| inst.aux.comm_E.to_coordinates()),
     )?;
 
     // u << |E::Base| despite the fact that u is a scalar.
     // So we parse all of its bytes as a E::Base element
-    let u = alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate u"), inst.map(|inst| inst.u))?;
+    let u =
+      alloc_scalar_as_base::<E, _>(cs.namespace(|| "allocate u"), inst.map(|inst| inst.aux.u))?;
 
     // Allocate X0 and X1. If the input instance is None, then allocate default values 0.
     let X0 = BigNat::alloc_from_nat(
       cs.namespace(|| "allocate X[0]"),
-      || Ok(f_to_nat(&inst.map_or(E::Scalar::ZERO, |inst| inst.X[0]))),
+      || {
+        Ok(f_to_nat(
+          &inst.map_or(E::Scalar::ZERO, |inst| inst.aux.X[0]),
+        ))
+      },
       limb_width,
       n_limbs,
     )?;
 
     let X1 = BigNat::alloc_from_nat(
       cs.namespace(|| "allocate X[1]"),
-      || Ok(f_to_nat(&inst.map_or(E::Scalar::ZERO, |inst| inst.X[1]))),
+      || {
+        Ok(f_to_nat(
+          &inst.map_or(E::Scalar::ZERO, |inst| inst.aux.X[1]),
+        ))
+      },
       limb_width,
       n_limbs,
     )?;
 
-    Ok(AllocatedRelaxedR1CSInstance { W, E, u, X0, X1 })
+    let precommit0 = AllocatedPoint::alloc(
+      cs.namespace(|| "allocate pre_commit_0"),
+      inst.map(|inst| inst.precommitted.0.to_coordinates()),
+    )?;
+    let precommit1 = AllocatedPoint::alloc(
+      cs.namespace(|| "allocate pre_commit_1"),
+      inst.map(|inst| inst.precommitted.1.to_coordinates()),
+    )?;
+
+    Ok(AllocatedRelaxedR1CSInstance {
+      W,
+      E,
+      u,
+      X0,
+      X1,
+      precommit0,
+      precommit1,
+    })
   }
 
   /// Allocates the hardcoded default `RelaxedR1CSInstance` in the circuit.
@@ -135,7 +185,18 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       n_limbs,
     )?;
 
-    Ok(AllocatedRelaxedR1CSInstance { W, E, u, X0, X1 })
+    let precommit0 = W.clone();
+    let precommit1 = W.clone();
+
+    Ok(AllocatedRelaxedR1CSInstance {
+      W,
+      E,
+      u,
+      X0,
+      X1,
+      precommit0,
+      precommit1,
+    })
   }
 
   /// Allocates the R1CS Instance as a `RelaxedR1CSInstance` in the circuit.
@@ -170,6 +231,8 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       u,
       X0,
       X1,
+      precommit0: inst.precommit0,
+      precommit1: inst.precommit1,
     })
   }
 
@@ -219,6 +282,15 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       ro.absorb(&limb);
     }
 
+    // absorb precommit0
+    ro.absorb(&self.precommit0.x);
+    ro.absorb(&self.precommit0.y);
+    ro.absorb(&self.precommit0.is_infinity);
+    // absorb precommit1
+    ro.absorb(&self.precommit1.x);
+    ro.absorb(&self.precommit1.y);
+    ro.absorb(&self.precommit1.is_infinity);
+
     Ok(())
   }
 
@@ -249,6 +321,24 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
     // W_fold = self.W + r * u.W
     let rW = u.W.scalar_mul(cs.namespace(|| "r * u.W"), &r_bits)?;
     let W_fold = self.W.add(cs.namespace(|| "self.W + r * u.W"), &rW)?;
+
+    // precommit0_fold = self.precommit0 + r * u.precommit0
+    let r_precommit0 = u
+      .precommit0
+      .scalar_mul(cs.namespace(|| "r * u.precommit0"), &r_bits)?;
+    let precommit0_fold = self.precommit0.add(
+      cs.namespace(|| "self.precommit0 + r * u.precommit0"),
+      &r_precommit0,
+    )?;
+
+    // precommit1_fold = self.precommit1 + r * u.precommit1
+    let r_precommit1 = u
+      .precommit1
+      .scalar_mul(cs.namespace(|| "r * u.precommit1"), &r_bits)?;
+    let precommit1_fold = self.precommit1.add(
+      cs.namespace(|| "self.precommit1 + r * u.precommit1"),
+      &r_precommit1,
+    )?;
 
     // E_fold = self.E + r * T
     let rT = T.scalar_mul(cs.namespace(|| "r * T"), &r_bits)?;
@@ -318,6 +408,8 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       u: u_fold,
       X0: X0_fold,
       X1: X1_fold,
+      precommit0: precommit0_fold,
+      precommit1: precommit1_fold,
     })
   }
 
@@ -363,6 +455,28 @@ impl<E: Engine> AllocatedRelaxedR1CSInstance<E> {
       condition,
     )?;
 
-    Ok(AllocatedRelaxedR1CSInstance { W, E, u, X0, X1 })
+    let precommit0 = AllocatedPoint::conditionally_select(
+      cs.namespace(|| "precommit0 = cond ? self.precommit0 : other.precommit0"),
+      &self.precommit0,
+      &other.precommit0,
+      condition,
+    )?;
+
+    let precommit1 = AllocatedPoint::conditionally_select(
+      cs.namespace(|| "precommit1 = cond ? self.precommit1 : other.precommit1"),
+      &self.precommit1,
+      &other.precommit1,
+      condition,
+    )?;
+
+    Ok(AllocatedRelaxedR1CSInstance {
+      W,
+      E,
+      u,
+      X0,
+      X1,
+      precommit0,
+      precommit1,
+    })
   }
 }

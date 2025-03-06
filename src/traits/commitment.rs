@@ -69,8 +69,18 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
   /// Extracts the blinding generator
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey;
 
-  /// Commits to the provided vector using the provided generators and random blind
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
+  /// Commits to the provided vector using the provided generators
+  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
+    Self::commit_at(ck, v, r, 0)
+  }
+
+  /// Commits to the provided vector using the provided generators
+  fn commit_at(
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+    idx: usize,
+  ) -> Self::Commitment;
 
   /// Batch commits to the provided vectors using the provided generators and random blind
   fn batch_commit(

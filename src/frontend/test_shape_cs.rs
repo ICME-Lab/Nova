@@ -123,7 +123,7 @@ where
 
   /// Returns the number of precommitted inputs defined for this `ShapeCS`.
   pub fn num_precommitted(&self) -> (usize, usize) {
-    unimplemented!("precommitted inputs are not supported in TestShapeCS")
+    (0, 0)
   }
 
   /// Print all public inputs, aux inputs, and constraint names.

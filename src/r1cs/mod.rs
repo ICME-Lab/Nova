@@ -21,6 +21,10 @@ use serde::{Deserialize, Serialize};
 
 mod sparse;
 pub(crate) use sparse::SparseMatrix;
+use split::{
+  SplitR1CSInstance, SplitR1CSWitness, SplitRelaxedR1CSInstance, SplitRelaxedR1CSWitness,
+};
+pub mod split;
 
 /// Public parameters for a given R1CS
 #[derive(Clone, Serialize, Deserialize)]
@@ -40,6 +44,7 @@ pub struct R1CSShape<E: Engine> {
   pub(crate) C: SparseMatrix<E::Scalar>,
   #[serde(skip, default = "OnceCell::new")]
   pub(crate) digest: OnceCell<E::Scalar>,
+  num_precommits: (usize, usize),
 }
 
 impl<E: Engine> SimpleDigestible for R1CSShape<E> {}
@@ -106,6 +111,7 @@ impl<E: Engine> R1CSShape<E> {
     num_cons: usize,
     num_vars: usize,
     num_io: usize,
+    num_precommits: (usize, usize),
     A: SparseMatrix<E::Scalar>,
     B: SparseMatrix<E::Scalar>,
     C: SparseMatrix<E::Scalar>,
@@ -134,6 +140,7 @@ impl<E: Engine> R1CSShape<E> {
       num_cons,
       num_vars,
       num_io,
+      num_precommits,
       A,
       B,
       C,
@@ -214,6 +221,30 @@ impl<E: Engine> R1CSShape<E> {
     }
   }
 
+  /// Checks if the Relaxed R1CS instance is satisfiable given a witness and its shape
+  pub fn is_sat_relaxed_split(
+    &self,
+    ck: &CommitmentKey<E>,
+    U: &SplitRelaxedR1CSInstance<E>,
+    W: &SplitRelaxedR1CSWitness<E>,
+  ) -> Result<(), NovaError> {
+    self.is_sat_relaxed(ck, &U.aux, &W.aux)?;
+    if U.precommitted
+      != (
+        CE::<E>::commit(ck, &W.precommitted.0, &E::Scalar::ZERO),
+        CE::<E>::commit_at(
+          ck,
+          &W.precommitted.1,
+          &E::Scalar::ZERO,
+          self.num_precommits.0,
+        ),
+      )
+    {
+      return Err(NovaError::UnSat);
+    }
+    Ok(())
+  }
+
   /// Checks if the R1CS instance is satisfiable given a witness and its shape
   pub fn is_sat(
     &self,
@@ -245,19 +276,43 @@ impl<E: Engine> R1CSShape<E> {
     }
   }
 
+  /// Checks if the R1CS instance is satisfiable given a witness and its shape
+  pub fn is_sat_split(
+    &self,
+    ck: &CommitmentKey<E>,
+    U: &SplitR1CSInstance<E>,
+    W: &SplitR1CSWitness<E>,
+  ) -> Result<(), NovaError> {
+    self.is_sat(ck, &U.aux, &W.aux)?;
+    if U.precommitted
+      != (
+        CE::<E>::commit(ck, &W.precommitted.0, &E::Scalar::ZERO),
+        CE::<E>::commit_at(
+          ck,
+          &W.precommitted.1,
+          &E::Scalar::ZERO,
+          self.num_precommits.0,
+        ),
+      )
+    {
+      return Err(NovaError::UnSat);
+    }
+    Ok(())
+  }
+
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
   pub fn commit_T(
     &self,
     ck: &CommitmentKey<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &R1CSInstance<E>,
-    W2: &R1CSWitness<E>,
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitR1CSInstance<E>,
+    W2: &SplitR1CSWitness<E>,
     r_T: &E::Scalar,
   ) -> Result<(Vec<E::Scalar>, Commitment<E>), NovaError> {
-    let Z1 = [W1.W.clone(), vec![U1.u], U1.X.clone()].concat();
-    let Z2 = [W2.W.clone(), vec![E::Scalar::ONE], U2.X.clone()].concat();
+    let Z1 = [W1.clone_W(), vec![U1.u()], U1.X().to_vec()].concat();
+    let Z2 = [W2.clone_W(), vec![E::Scalar::ONE], U2.X().to_vec()].concat();
 
     // The following code uses the optimization suggested in
     // Section 5.2 of [Mova](https://eprint.iacr.org/2024/1220.pdf)
@@ -266,7 +321,7 @@ impl<E: Engine> R1CSShape<E> {
       .zip(Z2.into_par_iter())
       .map(|(z1, z2)| z1 + z2)
       .collect::<Vec<E::Scalar>>();
-    let u = U1.u + E::Scalar::ONE; // U2.u = 1
+    let u = U1.u() + E::Scalar::ONE; // U2.u = 1
 
     let (AZ, BZ, CZ) = self.multiply_vec(&Z)?;
 
@@ -274,7 +329,7 @@ impl<E: Engine> R1CSShape<E> {
       .par_iter()
       .zip(BZ.par_iter())
       .zip(CZ.par_iter())
-      .zip(W1.E.par_iter())
+      .zip(W1.E().par_iter())
       .map(|(((az, bz), cz), e)| *az * *bz - u * *cz - *e)
       .collect::<Vec<E::Scalar>>();
 
@@ -344,6 +399,7 @@ impl<E: Engine> R1CSShape<E> {
         B: self.B.clone(),
         C: self.C.clone(),
         digest: OnceCell::new(),
+        num_precommits: self.num_precommits,
       };
     }
 
@@ -376,6 +432,7 @@ impl<E: Engine> R1CSShape<E> {
       num_cons: num_cons_padded,
       num_vars: num_vars_padded,
       num_io: self.num_io,
+      num_precommits: self.num_precommits,
       A: A_padded,
       B: B_padded,
       C: C_padded,
@@ -446,8 +503,8 @@ impl<E: Engine> R1CSWitness<E> {
   }
 
   /// Commits to the witness using the supplied generators
-  pub fn commit(&self, ck: &CommitmentKey<E>) -> Commitment<E> {
-    CE::<E>::commit(ck, &self.W, &self.r_W)
+  pub fn commit(&self, ck: &CommitmentKey<E>, num_precommits: (usize, usize)) -> Commitment<E> {
+    CE::<E>::commit_at(ck, &self.W, &self.r_W, num_precommits.0 + num_precommits.1)
   }
 }
 
@@ -482,7 +539,7 @@ impl<E: Engine> RelaxedR1CSWitness<E> {
   /// Produces a default `RelaxedR1CSWitness` given an `R1CSShape`
   pub fn default(S: &R1CSShape<E>) -> RelaxedR1CSWitness<E> {
     RelaxedR1CSWitness {
-      W: vec![E::Scalar::ZERO; S.num_vars],
+      W: vec![E::Scalar::ZERO; S.num_vars - S.num_precommits.0 - S.num_precommits.1],
       r_W: E::Scalar::ZERO,
       E: vec![E::Scalar::ZERO; S.num_cons],
       r_E: E::Scalar::ZERO,
@@ -812,6 +869,7 @@ mod tests {
       num_cons,
       num_vars,
       num_io,
+      (0, 0),
       SparseMatrix::new(&A, rows, cols),
       SparseMatrix::new(&B, rows, cols),
       SparseMatrix::new(&C, rows, cols),

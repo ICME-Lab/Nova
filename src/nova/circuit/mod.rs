@@ -15,7 +15,10 @@ use crate::{
       alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec, le_bits_to_num,
     },
   },
-  r1cs::{R1CSInstance, RelaxedR1CSInstance},
+  r1cs::{
+    split::{SplitR1CSInstance, SplitRelaxedR1CSInstance},
+    R1CSInstance, RelaxedR1CSInstance,
+  },
   traits::{
     circuit::StepCircuit, commitment::CommitmentTrait, Engine, ROCircuitTrait, ROConstantsCircuit,
   },
@@ -51,10 +54,10 @@ pub struct NovaAugmentedCircuitInputs<E: Engine> {
   i: E::Base,
   z0: Vec<E::Base>,
   zi: Option<Vec<E::Base>>,
-  U: Option<RelaxedR1CSInstance<E>>,
+  U: Option<SplitRelaxedR1CSInstance<E>>,
   ri: Option<E::Base>,
   r_next: E::Base,
-  u: Option<R1CSInstance<E>>,
+  u: Option<SplitR1CSInstance<E>>,
   T: Option<Commitment<E>>,
 }
 
@@ -65,10 +68,10 @@ impl<E: Engine> NovaAugmentedCircuitInputs<E> {
     i: E::Base,
     z0: Vec<E::Base>,
     zi: Option<Vec<E::Base>>,
-    U: Option<RelaxedR1CSInstance<E>>,
+    U: Option<SplitRelaxedR1CSInstance<E>>,
     ri: Option<E::Base>,
     r_next: E::Base,
-    u: Option<R1CSInstance<E>>,
+    u: Option<SplitR1CSInstance<E>>,
     T: Option<Commitment<E>>,
   ) -> Self {
     Self {
@@ -439,9 +442,9 @@ mod tests {
     let circuit1: NovaAugmentedCircuit<'_, E2, TrivialCircuit<<E2 as Engine>::Base>> =
       NovaAugmentedCircuit::new(primary_params, Some(inputs1), &tc1, ro_consts1);
     let _ = circuit1.synthesize(&mut cs1);
-    let (inst1, witness1) = cs1.r1cs_instance_and_witness(&shape1, &ck1).unwrap();
+    let (inst1, witness1) = cs1.split_r1cs_instance_and_witness(&shape1, &ck1).unwrap();
     // Make sure that this is satisfiable
-    assert!(shape1.is_sat(&ck1, &inst1, &witness1).is_ok());
+    assert!(shape1.is_sat_split(&ck1, &inst1, &witness1).is_ok());
 
     // Execute the base case for the secondary
     let zero2 = <<E1 as Engine>::Base as Field>::ZERO;

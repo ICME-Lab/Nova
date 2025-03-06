@@ -59,6 +59,11 @@ where
   pub fn aux_assignment(&self) -> &[Scalar] {
     &self.aux_assignment
   }
+
+  /// Get precommitted assignment
+  pub fn precommitted_assignment(&self) -> &[Vec<Scalar>; 2] {
+    &self.precommitted_assignment
+  }
 }
 
 impl<Scalar> ConstraintSystem<Scalar> for WitnessCS<Scalar>

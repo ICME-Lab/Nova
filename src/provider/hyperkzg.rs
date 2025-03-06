@@ -435,11 +435,16 @@ where
     Self::DerandKey { h: ck.h }
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
+  fn commit_at(
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+    idx: usize,
+  ) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
 
     Commitment {
-      comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()])
+      comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[idx..idx + v.len()])
         + <E::GE as DlogGroup>::group(&ck.h) * r,
     }
   }
