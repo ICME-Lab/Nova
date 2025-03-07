@@ -8,7 +8,7 @@ use crate::{
     split::{
       SplitR1CSInstance, SplitR1CSWitness, SplitRelaxedR1CSInstance, SplitRelaxedR1CSWitness,
     },
-    R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness,
+    R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness,
   },
   traits::{AbsorbInROTrait, Engine, ROTrait},
   Commitment, CommitmentKey,
@@ -228,7 +228,7 @@ mod tests {
       ConstraintSystem, SynthesisError,
     },
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
-    r1cs::{SparseMatrix, R1CS},
+    r1cs::{R1CSInstance, R1CSWitness, SparseMatrix, R1CS},
     traits::{commitment::CommitmentEngineTrait, snark::default_ck_hint, Engine},
   };
   use ff::{Field, PrimeField};
@@ -702,8 +702,8 @@ mod tests {
 
     let U1 = SplitR1CSInstance::new(U1, (Commitment::<E>::default(), Commitment::<E>::default()));
     let U2 = SplitR1CSInstance::new(U2, (Commitment::<E>::default(), Commitment::<E>::default()));
-    let W1 = SplitR1CSWitness::new(W1, (vec![E::Scalar::ZERO], vec![E::Scalar::ZERO]));
-    let W2 = SplitR1CSWitness::new(W2, (vec![E::Scalar::ZERO], vec![E::Scalar::ZERO]));
+    let W1 = SplitR1CSWitness::new(W1, (vec![], vec![]));
+    let W2 = SplitR1CSWitness::new(W2, (vec![], vec![]));
     // execute a sequence of folds
     execute_sequence(
       &ck,

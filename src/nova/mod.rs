@@ -1063,19 +1063,19 @@ mod tests {
     test_pp_digest_with::<PallasEngine, VestaEngine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["b3da591d9a3c7dc2632e550e009f2b745d60cf919956cf02e9ca68e8e5e17603"],
+      &expect!["11685fccc978b82e2ef566e6024d11d5bce8c0b2f37e60c53f5d3404e84f3b00"],
     );
 
     test_pp_digest_with::<Bn256EngineIPA, GrumpkinEngine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["aaf1f0b723e281603838004327e73a02f3a2b5e2f2087e34b6f4f2c8f34e8401"],
+      &expect!["89bb16a10914e67b71363d0c812d488a26189a9193b3c6b847413f99c937a001"],
     );
 
     test_pp_digest_with::<Secp256k1Engine, Secq256k1Engine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["890b992d9c431625610659fe62b5c00859188e60802a5852cf5db0d10ca59403"],
+      &expect!["54a466b51912672a636e5be466289051724cee26b47d5b0f66666ed241d14d01"],
     );
   }
 
@@ -1174,17 +1174,19 @@ mod tests {
     .unwrap();
 
     for i in 0..num_steps {
-      let res = recursive_snark.prove_step(&pp, &circuit_primary, &circuit_secondary);
-      assert!(res.is_ok());
+      recursive_snark
+        .prove_step(&pp, &circuit_primary, &circuit_secondary)
+        .expect("IVC proof should be sat");
 
       // verify the recursive snark at each step of recursion
-      let res = recursive_snark.verify(
-        &pp,
-        i + 1,
-        &[<E1 as Engine>::Scalar::ONE],
-        &[<E2 as Engine>::Scalar::ZERO],
-      );
-      assert!(res.is_ok());
+      recursive_snark
+        .verify(
+          &pp,
+          i + 1,
+          &[<E1 as Engine>::Scalar::ONE],
+          &[<E2 as Engine>::Scalar::ZERO],
+        )
+        .expect("IVC proof should be sat");
     }
 
     // verify the recursive SNARK

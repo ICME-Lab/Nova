@@ -46,7 +46,7 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
-    let W = R1CSWitness::<E>::new(shape, &self.aux_assignment())?;
+    let W = R1CSWitness::<E>::new(shape, self.aux_assignment())?;
     let X = &self.input_assignment()[1..];
 
     let comm_W = W.commit(
@@ -108,7 +108,7 @@ macro_rules! impl_nova_shape {
           );
         }
         assert_eq!(num_cons_added, num_constraints);
-        let total_num_vars = num_aux + num_precommitted.0 + num_precommitted.1 + num_inputs;
+        let total_num_vars = num_aux + num_precommitted.0 + num_precommitted.1;
         let num_cols = num_precommitted.0 + num_precommitted.1 + num_aux + num_inputs;
         A.cols = num_cols;
         B.cols = num_cols;

@@ -73,6 +73,12 @@ impl<E: Engine> AllocatedR1CSInstance<E> {
     ro.absorb(&self.W.is_infinity);
     ro.absorb(&self.X0);
     ro.absorb(&self.X1);
+    ro.absorb(&self.precommit0.x);
+    ro.absorb(&self.precommit0.y);
+    ro.absorb(&self.precommit0.is_infinity);
+    ro.absorb(&self.precommit1.x);
+    ro.absorb(&self.precommit1.y);
+    ro.absorb(&self.precommit1.is_infinity);
   }
 }
 
