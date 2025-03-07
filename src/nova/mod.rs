@@ -1683,3 +1683,138 @@ mod tests {
     test_setup_with::<Bn256EngineKZG, GrumpkinEngine>();
   }
 }
+
+#[cfg(test)]
+mod nebula_tests {
+  use crate::{
+    errors::NovaError,
+    frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
+    provider::{Bn256EngineKZG, GrumpkinEngine},
+    traits::{
+      circuit::{StepCircuit, TrivialCircuit},
+      snark::default_ck_hint,
+      Engine,
+    },
+  };
+  use ff::Field;
+  use ff::PrimeField;
+
+  use super::{PublicParams, RecursiveSNARK};
+
+  #[test]
+  fn test_pow_rs() -> Result<(), NovaError> {
+    type Fr = <Bn256EngineKZG as Engine>::Scalar;
+    let circuit = PowCircuit {
+      advice: Some((Fr::from(2u64), Fr::from(301u64))),
+    };
+    test_rs_with::<Bn256EngineKZG, GrumpkinEngine>(&circuit)
+  }
+
+  fn test_rs_with<E1, E2>(circuit: &impl StepCircuit<E1::Scalar>) -> Result<(), NovaError>
+  where
+    E1: Engine<Base = <E2 as Engine>::Scalar>,
+    E2: Engine<Base = <E1 as Engine>::Scalar>,
+  {
+    run_circuit::<E1, E2>(circuit)
+  }
+
+  fn run_circuit<E1, E2>(c: &impl StepCircuit<E1::Scalar>) -> Result<(), NovaError>
+  where
+    E1: Engine<Base = <E2 as Engine>::Scalar>,
+    E2: Engine<Base = <E1 as Engine>::Scalar>,
+  {
+    let pp = PublicParams::<E1, E2, _, _>::setup(
+      c,
+      &TrivialCircuit::default(),
+      &*default_ck_hint(),
+      &*default_ck_hint(),
+    )?;
+    let z_0 = vec![
+      E1::Scalar::from(2u64),
+      E1::Scalar::from(0u64),
+      E1::Scalar::from(0u64),
+    ];
+
+    let mut recursive_snark = RecursiveSNARK::new(
+      &pp,
+      c,
+      &TrivialCircuit::default(),
+      &z_0,
+      &[<E2 as Engine>::Scalar::ZERO],
+    )?;
+    for i in 0..3 {
+      recursive_snark.prove_step(&pp, c, &TrivialCircuit::default())?;
+      recursive_snark.verify(&pp, i + 1, &z_0, &[<E2 as Engine>::Scalar::ZERO])?;
+    }
+    Ok(())
+  }
+
+  #[derive(Clone, Default)]
+  pub struct PowCircuit<F>
+  where
+    F: PrimeField,
+  {
+    advice: Option<(F, F)>,
+  }
+
+  impl<F> StepCircuit<F> for PowCircuit<F>
+  where
+    F: PrimeField,
+  {
+    fn arity(&self) -> usize {
+      3
+    }
+
+    fn synthesize<CS: ConstraintSystem<F>>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<F>],
+    ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+      let mut x = z[0].clone();
+      let mut y = x.clone();
+      for i in 0..100 {
+        y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
+        x = y.clone();
+      }
+
+      let mut x_pc = AllocatedNum::alloc_pre_committed(
+        cs.namespace(|| "x_pc"),
+        || {
+          self
+            .advice
+            .map(|(x, _)| x)
+            .ok_or(SynthesisError::AssignmentMissing)
+        },
+        Split::First,
+      )?;
+      let mut y_pc = x_pc.clone();
+      for i in 0..5 {
+        y_pc = x_pc.square(cs.namespace(|| format!("x_sq_pc{i}")))?;
+        x_pc = y_pc.clone();
+      }
+
+      let mut x_pc_1 = AllocatedNum::alloc_pre_committed(
+        cs.namespace(|| "x_pc_1"),
+        || {
+          self
+            .advice
+            .map(|(_, x)| x)
+            .ok_or(SynthesisError::AssignmentMissing)
+        },
+        Split::Second,
+      )?;
+      let mut y_pc_1 = x_pc_1.clone();
+      for i in 0..5 {
+        y_pc_1 = x_pc_1.square(cs.namespace(|| format!("x_sq_pc_1{i}")))?;
+        x_pc_1 = y_pc_1.clone();
+      }
+
+      Ok(vec![y, y_pc, y_pc_1])
+    }
+
+    fn advice(&self) -> (Vec<F>, Vec<F>) {
+      let advice = self.advice.expect("Advice should manually be set");
+      (vec![advice.0], vec![advice.1])
+    }
+  }
+}

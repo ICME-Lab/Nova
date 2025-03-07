@@ -13,10 +13,7 @@ use crate::{
       conditionally_select_bignat, le_bits_to_num,
     },
   },
-  r1cs::{
-    split::{SplitR1CSInstance, SplitRelaxedR1CSInstance},
-    R1CSInstance, RelaxedR1CSInstance,
-  },
+  r1cs::split::{SplitR1CSInstance, SplitRelaxedR1CSInstance},
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
 };
 use ff::Field;

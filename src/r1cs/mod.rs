@@ -228,7 +228,42 @@ impl<E: Engine> R1CSShape<E> {
     U: &SplitRelaxedR1CSInstance<E>,
     W: &SplitRelaxedR1CSWitness<E>,
   ) -> Result<(), NovaError> {
-    self.is_sat_relaxed(ck, &U.aux, &W.aux)?;
+    let witness_vec = W.clone_W();
+    assert_eq!(witness_vec.len(), self.num_vars);
+    assert_eq!(W.aux.E.len(), self.num_cons);
+    assert_eq!(U.aux.X.len(), self.num_io);
+
+    // verify if Az * Bz = u*Cz + E
+    let res_eq = {
+      let z = [witness_vec, vec![U.aux.u], U.aux.X.clone()].concat();
+      let (Az, Bz, Cz) = self.multiply_vec(&z)?;
+      assert_eq!(Az.len(), self.num_cons);
+      assert_eq!(Bz.len(), self.num_cons);
+      assert_eq!(Cz.len(), self.num_cons);
+
+      (0..self.num_cons).all(|i| Az[i] * Bz[i] == U.aux.u * Cz[i] + W.aux.E[i])
+    };
+
+    // verify if comm_E and comm_W are commitments to E and W
+    let res_comm = {
+      let (comm_W, comm_E) = rayon::join(
+        || {
+          CE::<E>::commit_at(
+            ck,
+            &W.aux.W,
+            &W.aux.r_W,
+            self.num_precommits.0 + self.num_precommits.1,
+          )
+        },
+        || CE::<E>::commit(ck, &W.aux.E, &W.aux.r_E),
+      );
+      U.aux.comm_W == comm_W && U.aux.comm_E == comm_E
+    };
+
+    if !(res_eq && res_comm) {
+      return Err(NovaError::UnSat);
+    };
+
     if U.precommitted
       != (
         CE::<E>::commit(ck, &W.precommitted.0, &E::Scalar::ZERO),
@@ -283,7 +318,34 @@ impl<E: Engine> R1CSShape<E> {
     U: &SplitR1CSInstance<E>,
     W: &SplitR1CSWitness<E>,
   ) -> Result<(), NovaError> {
-    self.is_sat(ck, &U.aux, &W.aux)?;
+    let witness_vec = W.clone_W();
+    assert_eq!(witness_vec.len(), self.num_vars);
+    assert_eq!(U.aux.X.len(), self.num_io);
+
+    // verify if Az * Bz = u*Cz
+    let res_eq = {
+      let z = [witness_vec, vec![E::Scalar::ONE], U.aux.X.clone()].concat();
+      let (Az, Bz, Cz) = self.multiply_vec(&z)?;
+      assert_eq!(Az.len(), self.num_cons);
+      assert_eq!(Bz.len(), self.num_cons);
+      assert_eq!(Cz.len(), self.num_cons);
+
+      (0..self.num_cons).all(|i| Az[i] * Bz[i] == Cz[i])
+    };
+
+    // verify if comm_W is a commitment to W
+    let res_comm = U.aux.comm_W
+      == CE::<E>::commit_at(
+        ck,
+        &W.aux.W,
+        &W.aux.r_W,
+        self.num_precommits.0 + self.num_precommits.1,
+      );
+
+    if !(res_eq && res_comm) {
+      return Err(NovaError::UnSat);
+    }
+
     if U.precommitted
       != (
         CE::<E>::commit(ck, &W.precommitted.0, &E::Scalar::ZERO),
@@ -492,7 +554,7 @@ impl<E: Engine> R1CSShape<E> {
 impl<E: Engine> R1CSWitness<E> {
   /// A method to create a witness object using a vector of scalars
   pub fn new(S: &R1CSShape<E>, W: &[E::Scalar]) -> Result<R1CSWitness<E>, NovaError> {
-    if S.num_vars != W.len() {
+    if S.num_vars - S.num_precommits.0 - S.num_precommits.1 != W.len() {
       Err(NovaError::InvalidWitnessLength)
     } else {
       Ok(R1CSWitness {

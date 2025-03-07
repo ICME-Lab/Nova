@@ -483,7 +483,7 @@ pub enum Split {
 }
 
 impl Split {
-  pub fn is_first(&self) -> bool {
+  pub(crate) fn is_first(&self) -> bool {
     match self {
       Split::First => true,
       Split::Second => false,
