@@ -8,7 +8,7 @@ use crate::{
     split::{
       SplitR1CSInstance, SplitR1CSWitness, SplitRelaxedR1CSInstance, SplitRelaxedR1CSWitness,
     },
-    R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness,
+    R1CSShape,
   },
   traits::{AbsorbInROTrait, Engine, ROTrait},
   Commitment, CommitmentKey,
@@ -228,7 +228,9 @@ mod tests {
       ConstraintSystem, SynthesisError,
     },
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
-    r1cs::{R1CSInstance, R1CSWitness, SparseMatrix, R1CS},
+    r1cs::{
+      R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness, SparseMatrix, R1CS,
+    },
     traits::{commitment::CommitmentEngineTrait, snark::default_ck_hint, Engine},
   };
   use ff::{Field, PrimeField};

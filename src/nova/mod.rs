@@ -15,8 +15,7 @@ use crate::{
     split::{
       SplitR1CSInstance, SplitR1CSWitness, SplitRelaxedR1CSInstance, SplitRelaxedR1CSWitness,
     },
-    CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance,
-    RelaxedR1CSWitness,
+    CommitmentKeyHint, R1CSShape,
   },
   traits::{
     circuit::StepCircuit, commitment::CommitmentEngineTrait, snark::RelaxedR1CSSNARKTrait,
