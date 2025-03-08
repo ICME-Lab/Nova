@@ -1,5 +1,6 @@
 use super::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness};
 use crate::traits::commitment::CommitmentEngineTrait;
+use crate::DerandKey;
 use crate::{
   errors::NovaError,
   traits::{AbsorbInROTrait, Engine},
@@ -107,6 +108,10 @@ impl<E> SplitRelaxedR1CSInstance<E>
 where
   E: Engine,
 {
+  pub fn new(aux: RelaxedR1CSInstance<E>, precommitted: (Commitment<E>, Commitment<E>)) -> Self {
+    Self { aux, precommitted }
+  }
+
   /// Create a default instance
   pub fn default(_ck: &CommitmentKey<E>, S: &R1CSShape<E>) -> Self {
     let aux = RelaxedR1CSInstance::default(_ck, S);
@@ -122,6 +127,16 @@ where
     r: &E::Scalar,
   ) -> SplitRelaxedR1CSInstance<E> {
     let aux = self.aux.fold(&U2.aux, comm_T, r);
+    let precommitted = (
+      self.precommitted.0 + U2.precommitted.0 * *r,
+      self.precommitted.1 + U2.precommitted.1 * *r,
+    );
+    Self { aux, precommitted }
+  }
+
+  /// Folds an incoming `SplitR1CSInstance` into the current one
+  pub fn fold_relaxed(&self, U2: &Self, comm_T: &Commitment<E>, r: &E::Scalar) -> Self {
+    let aux = self.aux.fold_relaxed(&U2.aux, comm_T, r);
     let precommitted = (
       self.precommitted.0 + U2.precommitted.0 * *r,
       self.precommitted.1 + U2.precommitted.1 * *r,
@@ -146,6 +161,19 @@ where
     let precommitted = (instance.precommitted.0, instance.precommitted.1);
     Self { aux, precommitted }
   }
+
+  pub fn derandomize(
+    &self,
+    dk: &DerandKey<E>,
+    r_W: &E::Scalar,
+    r_E: &E::Scalar,
+  ) -> SplitRelaxedR1CSInstance<E> {
+    let aux = self.aux.derandomize(dk, r_W, r_E);
+    Self {
+      aux,
+      precommitted: self.precommitted,
+    }
+  }
 }
 
 impl<E: Engine> AbsorbInROTrait<E> for SplitRelaxedR1CSInstance<E> {
@@ -153,6 +181,21 @@ impl<E: Engine> AbsorbInROTrait<E> for SplitRelaxedR1CSInstance<E> {
     self.aux.absorb_in_ro(ro);
     self.precommitted.0.absorb_in_ro(ro);
     self.precommitted.1.absorb_in_ro(ro);
+  }
+}
+
+impl<E> From<SplitRelaxedR1CSInstance<E>> for RelaxedR1CSInstance<E>
+where
+  E: Engine,
+{
+  fn from(value: SplitRelaxedR1CSInstance<E>) -> Self {
+    let comm_W = value.precommitted.0 + value.precommitted.0 + value.aux.comm_W;
+    Self {
+      comm_E: value.aux.comm_E,
+      u: value.aux.u,
+      X: value.aux.X,
+      comm_W,
+    }
   }
 }
 
@@ -171,6 +214,10 @@ impl<E> SplitRelaxedR1CSWitness<E>
 where
   E: Engine,
 {
+  pub fn new(aux: RelaxedR1CSWitness<E>, precommitted: (Vec<E::Scalar>, Vec<E::Scalar>)) -> Self {
+    Self { aux, precommitted }
+  }
+
   /// Create a default witness
   pub fn default(S: &R1CSShape<E>) -> Self {
     let aux = RelaxedR1CSWitness::default(S);
@@ -190,6 +237,22 @@ where
     r: &E::Scalar,
   ) -> Result<SplitRelaxedR1CSWitness<E>, NovaError> {
     let aux = self.aux.fold(&W2.aux, T, r_T, r)?;
+    let precommitted = (
+      fold_witness(&self.precommitted.0, &W2.precommitted.0, *r)?,
+      fold_witness(&self.precommitted.1, &W2.precommitted.1, *r)?,
+    );
+    Ok(Self { aux, precommitted })
+  }
+
+  /// Folds an incoming `SplitR1CSWitness` into the current one
+  pub fn fold_relaxed(
+    &self,
+    W2: &Self,
+    T: &[E::Scalar],
+    r_T: &E::Scalar,
+    r: &E::Scalar,
+  ) -> Result<Self, NovaError> {
+    let aux = self.aux.fold_relaxed(&W2.aux, T, r_T, r)?;
     let precommitted = (
       fold_witness(&self.precommitted.0, &W2.precommitted.0, *r)?,
       fold_witness(&self.precommitted.1, &W2.precommitted.1, *r)?,
@@ -221,6 +284,33 @@ where
       witness.precommitted.1.clone(),
     );
     Self { aux, precommitted }
+  }
+
+  pub fn derandomize(&self) -> (Self, E::Scalar, E::Scalar) {
+    let (aux, wit_blind, err_blind) = self.aux.derandomize();
+    (
+      Self {
+        aux,
+        precommitted: self.precommitted.clone(),
+      },
+      wit_blind,
+      err_blind,
+    )
+  }
+}
+
+impl<E> From<SplitRelaxedR1CSWitness<E>> for RelaxedR1CSWitness<E>
+where
+  E: Engine,
+{
+  fn from(value: SplitRelaxedR1CSWitness<E>) -> Self {
+    let W = [value.precommitted.0, value.precommitted.1, value.aux.W].concat();
+    Self {
+      W,
+      E: value.aux.E,
+      r_E: value.aux.r_E,
+      r_W: value.aux.r_W,
+    }
   }
 }
 

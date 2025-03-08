@@ -405,14 +405,14 @@ impl<E: Engine> R1CSShape<E> {
   pub fn commit_T_relaxed(
     &self,
     ck: &CommitmentKey<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &RelaxedR1CSInstance<E>,
-    W2: &RelaxedR1CSWitness<E>,
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+    W2: &SplitRelaxedR1CSWitness<E>,
     r_T: &E::Scalar,
   ) -> Result<(Vec<E::Scalar>, Commitment<E>), NovaError> {
-    let Z1 = [W1.W.clone(), vec![U1.u], U1.X.clone()].concat();
-    let Z2 = [W2.W.clone(), vec![U2.u], U2.X.clone()].concat();
+    let Z1 = [W1.clone_W(), vec![U1.aux.u], U1.aux.X.clone()].concat();
+    let Z2 = [W2.clone_W(), vec![U2.aux.u], U2.aux.X.clone()].concat();
 
     // The following code uses the optimization suggested in
     // Section 5.2 of [Mova](https://eprint.iacr.org/2024/1220.pdf)
@@ -421,7 +421,7 @@ impl<E: Engine> R1CSShape<E> {
       .zip(Z2.into_par_iter())
       .map(|(z1, z2)| z1 + z2)
       .collect::<Vec<E::Scalar>>();
-    let u = U1.u + U2.u;
+    let u = U1.aux.u + U2.aux.u;
 
     let (AZ, BZ, CZ) = self.multiply_vec(&Z)?;
 
@@ -429,8 +429,8 @@ impl<E: Engine> R1CSShape<E> {
       .par_iter()
       .zip(BZ.par_iter())
       .zip(CZ.par_iter())
-      .zip(W1.E.par_iter())
-      .zip(W2.E.par_iter())
+      .zip(W1.aux.E.par_iter())
+      .zip(W2.aux.E.par_iter())
       .map(|((((az, bz), cz), e1), e2)| *az * *bz - u * *cz - *e1 - *e2)
       .collect::<Vec<E::Scalar>>();
 
@@ -506,7 +506,7 @@ impl<E: Engine> R1CSShape<E> {
   pub fn sample_random_instance_witness(
     &self,
     ck: &CommitmentKey<E>,
-  ) -> Result<(RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>), NovaError> {
+  ) -> Result<(SplitRelaxedR1CSInstance<E>, SplitRelaxedR1CSWitness<E>), NovaError> {
     // sample Z = (W, u, X)
     let Z = (0..self.num_vars + self.num_io + 1)
       .into_par_iter()
@@ -529,23 +529,41 @@ impl<E: Engine> R1CSShape<E> {
       .collect::<Vec<E::Scalar>>();
 
     // compute commitments to W,E in parallel
+    let num_precommits = self.num_precommits.0 + self.num_precommits.1;
     let (comm_W, comm_E) = rayon::join(
-      || CE::<E>::commit(ck, &Z[..self.num_vars], &r_W),
+      || CE::<E>::commit_at(ck, &Z[num_precommits..self.num_vars], &r_W, num_precommits),
       || CE::<E>::commit(ck, &E, &r_E),
     );
-
+    let comm_precommits0 = CE::<E>::commit(ck, &Z[..self.num_precommits.0], &E::Scalar::ZERO);
+    let comm_precommits1 = CE::<E>::commit_at(
+      ck,
+      &Z[self.num_precommits.0..num_precommits],
+      &E::Scalar::ZERO,
+      self.num_precommits.0,
+    );
+    let aux_U = RelaxedR1CSInstance {
+      comm_W,
+      comm_E,
+      u,
+      X: Z[self.num_vars + 1..].to_vec(),
+    };
+    let aux_W = RelaxedR1CSWitness {
+      W: Z[num_precommits..self.num_vars].to_vec(),
+      r_W,
+      E,
+      r_E,
+    };
     Ok((
-      RelaxedR1CSInstance {
-        comm_W,
-        comm_E,
-        u,
-        X: Z[self.num_vars + 1..].to_vec(),
+      SplitRelaxedR1CSInstance {
+        aux: aux_U,
+        precommitted: (comm_precommits0, comm_precommits1),
       },
-      RelaxedR1CSWitness {
-        W: Z[..self.num_vars].to_vec(),
-        r_W,
-        E,
-        r_E,
+      SplitRelaxedR1CSWitness {
+        aux: aux_W,
+        precommitted: (
+          Z[..self.num_precommits.0].to_vec(),
+          Z[self.num_precommits.0..num_precommits].to_vec(),
+        ),
       },
     ))
   }
@@ -960,7 +978,7 @@ mod tests {
     let r1cs = tiny_r1cs::<E>(4);
     let ck = R1CS::<E>::commitment_key(&r1cs, &*default_ck_hint());
     let (inst, wit) = r1cs.sample_random_instance_witness(&ck).unwrap();
-    assert!(r1cs.is_sat_relaxed(&ck, &inst, &wit).is_ok());
+    assert!(r1cs.is_sat_relaxed_split(&ck, &inst, &wit).is_ok());
   }
 
   #[test]

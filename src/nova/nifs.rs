@@ -136,14 +136,14 @@ impl<E: Engine> NIFSRelaxed<E> {
     ro_consts: &ROConstants<E>,
     pp_digest: &E::Scalar,
     S: &R1CSShape<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &RelaxedR1CSInstance<E>,
-    W2: &RelaxedR1CSWitness<E>,
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+    W2: &SplitRelaxedR1CSWitness<E>,
   ) -> Result<
     (
       NIFSRelaxed<E>,
-      (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
+      (SplitRelaxedR1CSInstance<E>, SplitRelaxedR1CSWitness<E>),
     ),
     NovaError,
   > {
@@ -186,9 +186,9 @@ impl<E: Engine> NIFSRelaxed<E> {
     &self,
     ro_consts: &ROConstants<E>,
     pp_digest: &E::Scalar,
-    U1: &RelaxedR1CSInstance<E>,
-    U2: &RelaxedR1CSInstance<E>,
-  ) -> Result<RelaxedR1CSInstance<E>, NovaError> {
+    U1: &SplitRelaxedR1CSInstance<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+  ) -> Result<SplitRelaxedR1CSInstance<E>, NovaError> {
     // initialize a new RO
     let mut ro = E::RO::new(ro_consts.clone());
 
@@ -372,14 +372,14 @@ mod tests {
     ro_consts: &<<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar>>::Constants,
     pp_digest: &<E as Engine>::Scalar,
     shape: &R1CSShape<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &RelaxedR1CSInstance<E>,
-    W2: &RelaxedR1CSWitness<E>,
-  ) -> (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>) {
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+    W2: &SplitRelaxedR1CSWitness<E>,
+  ) -> (SplitRelaxedR1CSInstance<E>, SplitRelaxedR1CSWitness<E>) {
     // produce a default running instance
-    let mut running_W = RelaxedR1CSWitness::default(shape);
-    let mut running_U = RelaxedR1CSInstance::default(ck, shape);
+    let mut running_W = SplitRelaxedR1CSWitness::default(shape);
+    let mut running_U = SplitRelaxedR1CSInstance::default(ck, shape);
 
     // produce a step SNARK with (W1, U1) as the first incoming witness-instance pair
     let res = NIFSRelaxed::prove(
@@ -418,21 +418,23 @@ mod tests {
     running_U = U;
 
     // check if the running instance is satisfiable
-    assert!(shape.is_sat_relaxed(ck, &running_U, &running_W).is_ok());
+    assert!(shape
+      .is_sat_relaxed_split(ck, &running_U, &running_W)
+      .is_ok());
 
     (running_U, running_W)
   }
 
   fn test_tiny_r1cs_relaxed_derandomize_with<E: Engine>() {
     let (ck, S, final_U, final_W) = test_tiny_r1cs_relaxed_with::<E>();
-    assert!(S.is_sat_relaxed(&ck, &final_U, &final_W).is_ok());
+    assert!(S.is_sat_relaxed_split(&ck, &final_U, &final_W).is_ok());
 
     let dk = E::CE::derand_key(&ck);
     let (derandom_final_W, final_blind_W, final_blind_E) = final_W.derandomize();
     let derandom_final_U = final_U.derandomize(&dk, &final_blind_W, &final_blind_E);
 
     assert!(S
-      .is_sat_relaxed(&ck, &derandom_final_U, &derandom_final_W)
+      .is_sat_relaxed_split(&ck, &derandom_final_U, &derandom_final_W)
       .is_ok());
   }
 
@@ -446,8 +448,8 @@ mod tests {
   fn test_tiny_r1cs_relaxed_with<E: Engine>() -> (
     CommitmentKey<E>,
     R1CSShape<E>,
-    RelaxedR1CSInstance<E>,
-    RelaxedR1CSWitness<E>,
+    SplitRelaxedR1CSInstance<E>,
+    SplitRelaxedR1CSWitness<E>,
   ) {
     let one = <E::Scalar as Field>::ONE;
     let (num_cons, num_vars, num_io, A, B, C) = {
@@ -564,14 +566,23 @@ mod tests {
 
     println!("INSTANCE {:#?}", U1.clone());
 
+    let U1 = SplitRelaxedR1CSInstance::new(
+      RelaxedR1CSInstance::from_r1cs_instance(&ck, &S, &U1),
+      (Commitment::<E>::default(), Commitment::<E>::default()),
+    );
+    let W1 = SplitRelaxedR1CSWitness::new(
+      RelaxedR1CSWitness::from_r1cs_witness(&S, &W1),
+      (vec![], vec![]),
+    );
+
     // execute a sequence of folds
     let (final_U, final_W) = execute_sequence_relaxed(
       &ck,
       &ro_consts,
       &<E as Engine>::Scalar::ZERO,
       &S,
-      &RelaxedR1CSInstance::from_r1cs_instance(&ck, &S, &U1),
-      &RelaxedR1CSWitness::from_r1cs_witness(&S, &W1),
+      &U1,
+      &W1,
       &U2,
       &W2,
     );
