@@ -71,6 +71,12 @@ pub enum NovaError {
   /// returned when there is an invalid incremental commitment
   #[error("InvalidIC")]
   InvalidIC,
+  /// returned when circuit for proving is not found
+  #[error("NoCircuit")]
+  NoCircuit,
+  /// returned when non-recursive SNARK is provided
+  #[error("NotRecursive")]
+  NotRecursive,
 }
 
 impl From<SynthesisError> for NovaError {

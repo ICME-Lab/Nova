@@ -45,7 +45,7 @@ impl NovaAugmentedCircuitParams {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
 pub struct NovaAugmentedCircuitInputs<E: Engine> {
   params: E::Scalar,
@@ -89,6 +89,7 @@ impl<E: Engine> NovaAugmentedCircuitInputs<E> {
   }
 }
 
+#[derive(Clone)]
 /// The augmented circuit F' in Nova that includes a step circuit F
 /// and the circuit for the verifier in Nova's non-interactive folding scheme
 pub struct NovaAugmentedCircuit<'a, E: Engine, SC: StepCircuit<E::Base>> {
