@@ -22,19 +22,24 @@ use crate::{
     circuit::StepCircuit, commitment::CommitmentEngineTrait, snark::RelaxedR1CSSNARKTrait,
     AbsorbInROTrait, Engine, ROConstants, ROConstantsCircuit, ROTrait,
   },
-  CommitmentKey, DerandKey,
+  Commitment, CommitmentKey, DerandKey,
 };
 use core::marker::PhantomData;
 use ff::Field;
+use ic::increment_comm;
 use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
 mod circuit;
+pub mod ic;
 mod nifs;
 
 use circuit::{NovaAugmentedCircuit, NovaAugmentedCircuitInputs, NovaAugmentedCircuitParams};
 use nifs::{NIFSRelaxed, NIFS};
+
+/// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
+pub type IncrementalCommitment<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
 
 /// A type that holds public parameters of Nova
 #[derive(Serialize, Deserialize)]
@@ -241,6 +246,9 @@ where
   i: usize,
   zi_primary: Vec<E1::Scalar>,
   zi_secondary: Vec<E2::Scalar>,
+  prev_ic: IncrementalCommitment<E1>,
+  prev_comm_advice: (Commitment<E1>, Commitment<E1>),
+  prev_ic_secondary: IncrementalCommitment<E2>,
   _p: PhantomData<(C1, C2)>,
 }
 
@@ -278,6 +286,7 @@ where
       ri_primary, // "r next"
       None,
       None,
+      None,
     );
 
     let circuit_primary: NovaAugmentedCircuit<'_, E2, C1> = NovaAugmentedCircuit::new(
@@ -301,6 +310,7 @@ where
       None,
       ri_secondary, // "r next"
       Some(u_primary.clone()),
+      None,
       None,
     );
     let circuit_secondary: NovaAugmentedCircuit<'_, E1, C2> = NovaAugmentedCircuit::new(
@@ -360,6 +370,9 @@ where
       i: 0,
       zi_primary,
       zi_secondary,
+      prev_ic: (E1::Scalar::ZERO, E1::Scalar::ZERO),
+      prev_comm_advice: (Commitment::<E1>::default(), Commitment::<E1>::default()),
+      prev_ic_secondary: (E2::Scalar::ZERO, E2::Scalar::ZERO),
       _p: Default::default(),
     })
   }
@@ -371,12 +384,15 @@ where
     pp: &PublicParams<E1, E2, C1, C2>,
     c_primary: &C1,
     c_secondary: &C2,
+    ic: IncrementalCommitment<E1>,
   ) -> Result<(), NovaError> {
     // first step was already done in the constructor
     if self.i == 0 {
       self.i = 1;
+      self.prev_comm_advice = self.r_U_primary.precommitted;
       return Ok(());
     }
+    self.ic_check(pp, ic)?;
 
     // fold the secondary circuit's instance
     let (nifs_secondary, (r_U_secondary, r_W_secondary)) = NIFS::prove(
@@ -403,6 +419,7 @@ where
       r_next_primary,
       Some(self.l_u_secondary.clone()),
       Some(nifs_secondary.comm_T),
+      Some(self.prev_ic_secondary),
     );
 
     let circuit_primary: NovaAugmentedCircuit<'_, E2, C1> = NovaAugmentedCircuit::new(
@@ -427,7 +444,7 @@ where
       &l_u_primary,
       &l_w_primary,
     )?;
-
+    self.prev_comm_advice = l_u_primary.precommitted;
     let r_next_secondary = E2::Scalar::random(&mut OsRng);
 
     let mut cs_secondary = SatisfyingAssignment::<E2>::new();
@@ -441,6 +458,7 @@ where
       r_next_secondary,
       Some(l_u_primary),
       Some(nifs_primary.comm_T),
+      Some(self.prev_ic),
     );
 
     let circuit_secondary: NovaAugmentedCircuit<'_, E1, C2> = NovaAugmentedCircuit::new(
@@ -472,7 +490,13 @@ where
     self.r_W_primary = r_W_primary;
 
     self.i += 1;
-
+    self.prev_ic = ic;
+    self.prev_ic_secondary = ic::increment_ic::<E2, E1>(
+      &pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      self.prev_ic_secondary,
+      (&[], &[]),
+    );
     self.r_U_secondary = r_U_secondary;
     self.r_W_secondary = r_W_secondary;
 
@@ -489,6 +513,7 @@ where
     num_steps: usize,
     z0_primary: &[E1::Scalar],
     z0_secondary: &[E2::Scalar],
+    ic: IncrementalCommitment<E1>,
   ) -> Result<(Vec<E1::Scalar>, Vec<E2::Scalar>), NovaError> {
     // number of steps cannot be zero
     let is_num_steps_zero = num_steps == 0;
@@ -525,6 +550,8 @@ where
       }
       self.r_U_secondary.absorb_in_ro(&mut hasher);
       hasher.absorb(self.ri_primary);
+      hasher.absorb(scalar_as_base::<E2>(self.prev_ic_secondary.0));
+      hasher.absorb(scalar_as_base::<E2>(self.prev_ic_secondary.1));
 
       let mut hasher2 = <E1 as Engine>::RO::new(pp.ro_consts_primary.clone());
       hasher2.absorb(scalar_as_base::<E1>(pp.digest()));
@@ -537,7 +564,8 @@ where
       }
       self.r_U_primary.absorb_in_ro(&mut hasher2);
       hasher2.absorb(self.ri_secondary);
-
+      hasher2.absorb(scalar_as_base::<E1>(self.prev_ic.0));
+      hasher2.absorb(scalar_as_base::<E1>(self.prev_ic.1));
       (
         hasher.squeeze(NUM_HASH_BITS),
         hasher2.squeeze(NUM_HASH_BITS),
@@ -584,6 +612,8 @@ where
     res_r_secondary?;
     res_l_secondary?;
 
+    self.ic_check(pp, ic)?;
+
     Ok((self.zi_primary.clone(), self.zi_secondary.clone()))
   }
 
@@ -595,6 +625,19 @@ where
   /// The number of steps which have been executed thus far.
   pub fn num_steps(&self) -> usize {
     self.i
+  }
+
+  fn ic_check(
+    &self,
+    pp: &PublicParams<E1, E2, C1, C2>,
+    ic: IncrementalCommitment<E1>,
+  ) -> Result<(), NovaError> {
+    let expected_ic =
+      increment_comm::<E1, E2>(&pp.ro_consts_primary, self.prev_ic, self.prev_comm_advice);
+    if expected_ic != ic {
+      return Err(NovaError::InvalidIC);
+    }
+    Ok(())
   }
 }
 
@@ -966,6 +1009,7 @@ mod tests {
   use super::*;
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+    nova::ic::increment_ic,
     provider::{
       pedersen::CommitmentKeyExtTrait, traits::DlogGroup, Bn256EngineIPA, Bn256EngineKZG,
       GrumpkinEngine, PallasEngine, Secp256k1Engine, Secq256k1Engine, VestaEngine,
@@ -1063,19 +1107,19 @@ mod tests {
     test_pp_digest_with::<PallasEngine, VestaEngine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["11685fccc978b82e2ef566e6024d11d5bce8c0b2f37e60c53f5d3404e84f3b00"],
+      &expect!["5c15bdb85d1d26f071321db459a258e2ec3cba25026eb4427a4a39dba3c54c00"],
     );
 
     test_pp_digest_with::<Bn256EngineIPA, GrumpkinEngine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["89bb16a10914e67b71363d0c812d488a26189a9193b3c6b847413f99c937a001"],
+      &expect!["55333a2332c3ac386e254c8cdb3297909a059a3dd09156037114b53adb78cb00"],
     );
 
     test_pp_digest_with::<Secp256k1Engine, Secq256k1Engine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["54a466b51912672a636e5be466289051724cee26b47d5b0f66666ed241d14d01"],
+      &expect!["1e22e740019b29dbde754cfa32b1bf576d3517c3481c008d66e11bc3c2161f01"],
     );
   }
 
@@ -1113,8 +1157,15 @@ mod tests {
     )
     .unwrap();
 
-    let res = recursive_snark.prove_step(&pp, &test_circuit1, &test_circuit2);
-
+    let mut ic = IncrementalCommitment::<E1>::default();
+    let res = recursive_snark.prove_step(&pp, &test_circuit1, &test_circuit2, ic);
+    let (advice_0, advice_1) = test_circuit1.advice();
+    ic = increment_ic::<E1, E2>(
+      &pp.ck_primary,
+      &pp.ro_consts_primary,
+      ic,
+      (&advice_0, &advice_1),
+    );
     assert!(res.is_ok());
 
     // verify the recursive SNARK
@@ -1123,6 +1174,7 @@ mod tests {
       num_steps,
       &[<E1 as Engine>::Scalar::ZERO],
       &[<E2 as Engine>::Scalar::ZERO],
+      ic,
     );
     assert!(res.is_ok());
   }
@@ -1173,10 +1225,18 @@ mod tests {
     )
     .unwrap();
 
+    let mut ic = IncrementalCommitment::<E1>::default();
     for i in 0..num_steps {
       recursive_snark
-        .prove_step(&pp, &circuit_primary, &circuit_secondary)
+        .prove_step(&pp, &circuit_primary, &circuit_secondary, ic)
         .expect("IVC proof should be sat");
+      let (advice_0, advice_1) = circuit_primary.advice();
+      ic = increment_ic::<E1, E2>(
+        &pp.ck_primary,
+        &pp.ro_consts_primary,
+        ic,
+        (&advice_0, &advice_1),
+      );
 
       // verify the recursive snark at each step of recursion
       recursive_snark
@@ -1185,6 +1245,7 @@ mod tests {
           i + 1,
           &[<E1 as Engine>::Scalar::ONE],
           &[<E2 as Engine>::Scalar::ZERO],
+          ic,
         )
         .expect("IVC proof should be sat");
     }
@@ -1195,6 +1256,7 @@ mod tests {
       num_steps,
       &[<E1 as Engine>::Scalar::ONE],
       &[<E2 as Engine>::Scalar::ZERO],
+      ic,
     );
     assert!(res.is_ok());
 
@@ -1599,8 +1661,16 @@ mod tests {
     )
     .unwrap();
 
+    let mut ic = IncrementalCommitment::<E1>::default();
     // produce a recursive SNARK
-    let res = recursive_snark.prove_step(&pp, &test_circuit1, &test_circuit2);
+    let res = recursive_snark.prove_step(&pp, &test_circuit1, &test_circuit2, ic);
+    let (advice_0, advice_1) = test_circuit1.advice();
+    ic = increment_ic::<E1, E2>(
+      &pp.ck_primary,
+      &pp.ro_consts_primary,
+      ic,
+      (&advice_0, &advice_1),
+    );
 
     assert!(res.is_ok());
 
@@ -1610,6 +1680,7 @@ mod tests {
       num_steps,
       &[<E1 as Engine>::Scalar::ONE],
       &[<E2 as Engine>::Scalar::ZERO],
+      ic,
     );
     assert!(res.is_ok());
 
@@ -1699,7 +1770,7 @@ mod nebula_tests {
   use ff::Field;
   use ff::PrimeField;
 
-  use super::{PublicParams, RecursiveSNARK};
+  use super::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK};
 
   #[test]
   fn test_pow_rs() -> Result<(), NovaError> {
@@ -1742,9 +1813,17 @@ mod nebula_tests {
       &z_0,
       &[<E2 as Engine>::Scalar::ZERO],
     )?;
+    let mut ic = IncrementalCommitment::<E1>::default();
     for i in 0..3 {
-      recursive_snark.prove_step(&pp, c, &TrivialCircuit::default())?;
-      recursive_snark.verify(&pp, i + 1, &z_0, &[<E2 as Engine>::Scalar::ZERO])?;
+      recursive_snark.prove_step(&pp, c, &TrivialCircuit::default(), ic)?;
+      let (advice_0, advice_1) = c.advice();
+      ic = increment_ic::<E1, E2>(
+        &pp.ck_primary,
+        &pp.ro_consts_primary,
+        ic,
+        (&advice_0, &advice_1),
+      );
+      recursive_snark.verify(&pp, i + 1, &z_0, &[<E2 as Engine>::Scalar::ZERO], ic)?;
     }
     Ok(())
   }

@@ -68,6 +68,9 @@ pub enum NovaError {
   /// returned when the prover cannot prove the provided statement due to completeness error
   #[error("InternalError")]
   InternalError,
+  /// returned when there is an invalid incremental commitment
+  #[error("InvalidIC")]
+  InvalidIC,
 }
 
 impl From<SynthesisError> for NovaError {
