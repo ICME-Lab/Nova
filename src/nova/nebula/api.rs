@@ -110,7 +110,7 @@ where
 }
 
 /// Apply Spartan to prove knowledge of a valid Nebula IVC proof
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(bound = "")]
 pub struct NebulaCompressedSNARK<E1, E2, S1, S2>
 where
@@ -203,7 +203,7 @@ where
 /// memory correctly.
 ///
 /// The constant `M` is the number of memory operations per step in the vm.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(bound = "")]
 pub enum NebulaSNARK<E1, E2, S1, S2, const M: usize>
 where

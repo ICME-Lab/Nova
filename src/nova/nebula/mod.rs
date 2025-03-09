@@ -2,6 +2,7 @@
 //! for recursive proof systems using commitment-carrying NIVC
 
 pub mod api;
+pub use product_circuits::convert_advice;
 mod product_circuits;
 
 #[cfg(test)]
