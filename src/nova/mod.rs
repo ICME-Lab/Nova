@@ -5,7 +5,6 @@ use crate::{
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   frontend::{
-    num::AllocatedNum,
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
@@ -711,7 +710,7 @@ where
   zn_primary: Vec<E1::Scalar>,
   zn_secondary: Vec<E2::Scalar>,
 
-  prev_ic: IncrementalCommitment<E1>,
+  ic: IncrementalCommitment<E1>,
   prev_ic_secondary: IncrementalCommitment<E2>,
 }
 
@@ -754,6 +753,7 @@ where
     pp: &PublicParams<E1, E2>,
     pk: &ProverKey<E1, E2, S1, S2>,
     recursive_snark: &RecursiveSNARK<E1, E2>,
+    ic: IncrementalCommitment<E1>,
   ) -> Result<Self, NovaError> {
     // prove three foldings
 
@@ -817,7 +817,6 @@ where
       &wit_blind_r_Wn_secondary,
       &err_blind_r_Wn_secondary,
     );
-
     // create SNARKs proving the knowledge of Wn primary/secondary
     let (snark_primary, snark_secondary) = rayon::join(
       || {
@@ -865,7 +864,7 @@ where
       zn_primary: recursive_snark.zi_primary.clone(),
       zn_secondary: recursive_snark.zi_secondary.clone(),
 
-      prev_ic: recursive_snark.prev_ic,
+      ic,
       prev_ic_secondary: recursive_snark.prev_ic_secondary,
     })
   }
@@ -920,8 +919,8 @@ where
       }
       self.r_U_primary.absorb_in_ro(&mut hasher2);
       hasher2.absorb(self.ri_secondary);
-      hasher2.absorb(scalar_as_base::<E1>(self.prev_ic.0));
-      hasher2.absorb(scalar_as_base::<E1>(self.prev_ic.1));
+      hasher2.absorb(scalar_as_base::<E1>(self.ic.0));
+      hasher2.absorb(scalar_as_base::<E1>(self.ic.1));
 
       (
         hasher.squeeze(NUM_HASH_BITS),
@@ -1096,7 +1095,7 @@ mod tests {
     test_pp_digest_with::<PallasEngine, VestaEngine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["5c15bdb85d1d26f071321db459a258e2ec3cba25026eb4427a4a39dba3c54c00"],
+      &expect!["768d8cd5634dd8b0f8f1fb1eaaf3726890bc8da8bb1e239a5b57acc0160c9f02"],
     );
 
     test_pp_digest_with::<Bn256EngineIPA, GrumpkinEngine, _, _>(
@@ -1322,7 +1321,8 @@ mod tests {
     let (pk, vk) = CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
-    let res = CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::prove(&pp, &pk, &recursive_snark);
+    let res =
+      CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::prove(&pp, &pk, &recursive_snark, ic);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1421,8 +1421,12 @@ mod tests {
     let (pk, vk) = CompressedSNARK::<_, _, SPrime<E1, EE1>, SPrime<E2, EE2>>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
-    let res =
-      CompressedSNARK::<_, _, SPrime<E1, EE1>, SPrime<E2, EE2>>::prove(&pp, &pk, &recursive_snark);
+    let res = CompressedSNARK::<_, _, SPrime<E1, EE1>, SPrime<E2, EE2>>::prove(
+      &pp,
+      &pk,
+      &recursive_snark,
+      ic,
+    );
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1565,7 +1569,8 @@ mod tests {
     let (pk, vk) = CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
-    let res = CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::prove(&pp, &pk, &recursive_snark);
+    let res =
+      CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::prove(&pp, &pk, &recursive_snark, ic);
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
@@ -1705,13 +1710,15 @@ mod tests {
 #[cfg(test)]
 mod cc_tests {
   use super::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK};
+  use crate::traits::snark::RelaxedR1CSSNARKTrait;
   use crate::{
     errors::NovaError,
     frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
-    provider::{Bn256EngineKZG, GrumpkinEngine},
+    nova::CompressedSNARK,
+    provider::{Bn256EngineIPA, GrumpkinEngine},
     traits::{
       circuit::{StepCircuit, TrivialCircuit},
-      snark::default_ck_hint,
+      evaluation::EvaluationEngineTrait,
       Engine,
     },
   };
@@ -1720,34 +1727,48 @@ mod cc_tests {
   use rand::{rngs::StdRng, RngCore};
   use rand_core::SeedableRng;
 
+  type EE<E> = crate::provider::ipa_pc::EvaluationEngine<E>;
+  type S<E, EE> = crate::spartan::snark::RelaxedR1CSSNARK<E, EE>;
+  type SPrime<E, EE> = crate::spartan::ppsnark::RelaxedR1CSSNARK<E, EE>;
+
   #[test]
   fn test_pow_rs() -> Result<(), NovaError> {
-    type Fr = <Bn256EngineKZG as Engine>::Scalar;
+    type Fr = <Bn256EngineIPA as Engine>::Scalar;
+    type E1 = Bn256EngineIPA;
+    type E2 = GrumpkinEngine;
     let mut rng = StdRng::seed_from_u64(0u64);
     let circuits = (0..10)
       .map(|_| PowCircuit::<Fr>::random(&mut rng))
       .collect::<Vec<_>>();
-    test_rs_with::<Bn256EngineKZG, GrumpkinEngine>(&circuits)
+    test_rs_with::<E1, E2, EE<E1>, EE<E2>>(&circuits)
   }
 
-  fn test_rs_with<E1, E2>(circuits: &[impl StepCircuit<E1::Scalar>]) -> Result<(), NovaError>
+  fn test_rs_with<E1, E2, EE1, EE2>(
+    circuits: &[impl StepCircuit<E1::Scalar>],
+  ) -> Result<(), NovaError>
   where
     E1: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E1 as Engine>::Scalar>,
+    EE1: EvaluationEngineTrait<E1>,
+    EE2: EvaluationEngineTrait<E2>,
   {
-    run_circuits::<E1, E2>(circuits)
+    run_circuits::<E1, E2, EE1, EE2>(circuits)
   }
 
-  fn run_circuits<E1, E2>(circuits: &[impl StepCircuit<E1::Scalar>]) -> Result<(), NovaError>
+  fn run_circuits<E1, E2, EE1, EE2>(
+    circuits: &[impl StepCircuit<E1::Scalar>],
+  ) -> Result<(), NovaError>
   where
     E1: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E1 as Engine>::Scalar>,
+    EE1: EvaluationEngineTrait<E1>,
+    EE2: EvaluationEngineTrait<E2>,
   {
     let pp = PublicParams::<E1, E2>::setup(
       &circuits[0],
       &TrivialCircuit::default(),
-      &*default_ck_hint(),
-      &*default_ck_hint(),
+      &*SPrime::<E1, EE1>::ck_floor(),
+      &*SPrime::<E2, EE2>::ck_floor(),
     )?;
     let z_0 = vec![
       E1::Scalar::from(2u64),
@@ -1763,8 +1784,7 @@ mod cc_tests {
       &[<E2 as Engine>::Scalar::ZERO],
     )?;
     let mut ic = IncrementalCommitment::<E1>::default();
-    for (i, circuit) in circuits.iter().enumerate() {
-      println!("Proving step {}", i);
+    for circuit in circuits.iter() {
       recursive_snark.prove_step(&pp, circuit, &TrivialCircuit::default(), ic)?;
       let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
@@ -1781,6 +1801,23 @@ mod cc_tests {
         ic,
       )?;
     }
+    // produce the prover and verifier keys for compressed snark
+    let (pk, vk) = CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::setup(&pp).unwrap();
+
+    // produce a compressed SNARK
+    let compressed_snark =
+      CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::prove(&pp, &pk, &recursive_snark, ic)
+        .unwrap();
+
+    // verify the compressed SNARK
+    compressed_snark
+      .verify(
+        &vk,
+        recursive_snark.num_steps(),
+        &z_0,
+        &[<E2 as Engine>::Scalar::ZERO],
+      )
+      .unwrap();
     Ok(())
   }
 

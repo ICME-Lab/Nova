@@ -109,7 +109,7 @@ macro_rules! impl_nova_shape {
         }
         assert_eq!(num_cons_added, num_constraints);
         let total_num_vars = num_aux + num_precommitted.0 + num_precommitted.1;
-        let num_cols = num_precommitted.0 + num_precommitted.1 + num_aux + num_inputs;
+        let num_cols = total_num_vars + num_inputs;
         A.cols = num_cols;
         B.cols = num_cols;
         C.cols = num_cols;

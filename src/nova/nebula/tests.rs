@@ -1,19 +1,11 @@
 use crate::{
   errors::NovaError,
-  frontend::{
-    num::AllocatedNum, test_cs::TestConstraintSystem, ConstraintSystem, Split, SynthesisError,
-  },
+  frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
   gadgets::{nebula::allocated_avt, nonnative::util::Num, utils::conditionally_select2},
-  nova::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK},
   provider::{ipa_pc, Bn256EngineIPA, GrumpkinEngine},
   spartan::snark::RelaxedR1CSSNARK,
-  traits::{
-    circuit::{StepCircuit, TrivialCircuit},
-    snark::default_ck_hint,
-    Engine,
-  },
+  traits::{circuit::StepCircuit, Engine},
 };
-use ff::Field;
 use ff::PrimeField;
 use itertools::Itertools;
 
@@ -73,15 +65,15 @@ fn test_heapify() {
   // Verify vm execution and memory consistency
   nebula_snark.verify(&pp, &U).expect(ms_err);
 
-  // // setup and compress
-  // let r1cs_err = "R1CS instance, witness pairs should be sat";
-  // let spartan = nebula_snark.compress(&pp).expect(r1cs_err);
-  // spartan.verify(&pp, &U).expect(r1cs_err);
+  // setup and compress
+  let r1cs_err = "R1CS instance, witness pairs should be sat";
+  let spartan = nebula_snark.compress(&pp, &U).expect(r1cs_err);
+  spartan.verify(&pp, &U).unwrap();
 
-  // if false {
-  //   let spartan_str = serde_json::to_string(&spartan).unwrap();
-  //   println!("SNARK size {} KB", spartan_str.len() / 1024);
-  // }
+  if false {
+    let spartan_str = serde_json::to_string(&spartan).unwrap();
+    println!("SNARK size {} KB", spartan_str.len() / 1024);
+  }
 }
 
 struct HeapifyEngine {
@@ -515,25 +507,4 @@ fn write_op(
 
   // 5. WS ← WS ∪ {(a,v',ts)}.
   WS.push((addr, val, *global_ts));
-}
-
-#[allow(dead_code)]
-fn debug_step<E>(circuit: &impl StepCircuit<E::Scalar>, z_i: &[E::Scalar]) -> Result<(), NovaError>
-where
-  E: Engine,
-{
-  let mut cs = TestConstraintSystem::<E::Scalar>::new();
-  let z_i: Vec<AllocatedNum<E::Scalar>> = z_i
-    .iter()
-    .enumerate()
-    .map(|(i, scalar)| AllocatedNum::alloc(cs.namespace(|| format!("z_{}", i)), || Ok(*scalar)))
-    .collect::<Result<Vec<_>, _>>()?;
-  circuit
-    .synthesize(&mut cs, &z_i)
-    .map_err(|_| NovaError::from(SynthesisError::AssignmentMissing))?;
-  let is_sat = cs.is_satisfied();
-  if !is_sat {
-    assert!(is_sat);
-  }
-  Ok(())
 }

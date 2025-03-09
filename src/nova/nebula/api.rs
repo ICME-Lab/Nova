@@ -163,10 +163,11 @@ where
     pp: &NebulaPublicParams<E1, E2, S1, S2, M>,
     pk: &NebulaProverKey<E1, E2, S1, S2>,
     rs: &NebulaRecursiveSNARK<E1, E2>,
+    U: &NebulaInstance<E1>,
   ) -> Result<NebulaCompressedSNARK<E1, E2, S1, S2>, NovaError> {
-    let F = CompressedSNARK::prove(pp.F(), &pk.F, &rs.F)?;
-    let ops = CompressedSNARK::prove(pp.ops(), &pk.ops, &rs.ops)?;
-    let scan = CompressedSNARK::prove(pp.scan(), &pk.scan, &rs.scan)?;
+    let F = CompressedSNARK::prove(pp.F(), &pk.F, &rs.F, U.F_ic)?;
+    let ops = CompressedSNARK::prove(pp.ops(), &pk.ops, &rs.ops, U.ops_ic)?;
+    let scan = CompressedSNARK::prove(pp.scan(), &pk.scan, &rs.scan, U.scan_ic)?;
     Ok(NebulaCompressedSNARK { F, ops, scan })
   }
 
@@ -334,12 +335,17 @@ where
   }
 
   /// Apply Spartan on top of the Nebula IVC proofs
-  pub fn compress(&self, pp: &NebulaPublicParams<E1, E2, S1, S2, M>) -> Result<Self, NovaError> {
+  pub fn compress(
+    &self,
+    pp: &NebulaPublicParams<E1, E2, S1, S2, M>,
+    U: &NebulaInstance<E1>,
+  ) -> Result<Self, NovaError> {
     match self {
       Self::Recursive(rs) => Ok(Self::Compressed(Box::new(NebulaCompressedSNARK::prove(
         pp,
         pp.pk(),
         rs.as_ref(),
+        U,
       )?))),
       Self::Compressed(..) => Err(NovaError::NotRecursive),
     }

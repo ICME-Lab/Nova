@@ -213,7 +213,6 @@ impl<E: Engine> R1CSShape<E> {
       );
       U.comm_W == comm_W && U.comm_E == comm_E
     };
-
     if res_eq && res_comm {
       Ok(())
     } else {

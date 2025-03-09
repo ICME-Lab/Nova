@@ -189,7 +189,7 @@ where
   E: Engine,
 {
   fn from(value: SplitRelaxedR1CSInstance<E>) -> Self {
-    let comm_W = value.precommitted.0 + value.precommitted.0 + value.aux.comm_W;
+    let comm_W = value.precommitted.0 + value.precommitted.1 + value.aux.comm_W;
     Self {
       comm_E: value.aux.comm_E,
       u: value.aux.u,
