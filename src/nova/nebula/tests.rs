@@ -4,7 +4,7 @@ use crate::{
     num::AllocatedNum, test_cs::TestConstraintSystem, ConstraintSystem, Split, SynthesisError,
   },
   gadgets::{nebula::allocated_avt, nonnative::util::Num, utils::conditionally_select2},
-  nova::PublicParams,
+  nova::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK},
   provider::{ipa_pc, Bn256EngineIPA, GrumpkinEngine},
   spartan::snark::RelaxedR1CSSNARK,
   traits::{
@@ -13,6 +13,7 @@ use crate::{
     Engine,
   },
 };
+use ff::Field;
 use ff::PrimeField;
 use itertools::Itertools;
 
@@ -39,9 +40,9 @@ type S2 = RelaxedR1CSSNARK<E2, EE2>;
 #[test]
 fn test_heapify() {
   let step_size = StepSize::new(1).set_memory_step_size(2);
-  // let pp: NebulaPublicParams<E1, E2, S1, S2, MEMORY_OPS_PER_STEP> =
-  //   NebulaSNARK::setup(&HeapifyCircuit::empty(), step_size)
-  //     .expect("Public parameters should be constructed");
+  let pp: NebulaPublicParams<E1, E2, S1, S2, MEMORY_OPS_PER_STEP> =
+    NebulaSNARK::setup(&HeapifyCircuit::empty(), step_size)
+      .expect("Public parameters should be constructed");
 
   // Calculate testing memory (heap) size. We keep the test simple and ensure
   // memory size is a power of two
@@ -52,40 +53,25 @@ fn test_heapify() {
   let (read_ops, write_ops) = memory_ops_trace(&mut final_memory);
 
   // Custom zkVM engine for heapify
-  let mut heapify_engine = HeapifyEngine {
+  let heapify_engine = HeapifyEngine {
     read_ops: read_ops.clone(),
     write_ops: write_ops.clone(),
     start_addr: ((init_memory.len() - 4) / 2),
   };
-  let pp = PublicParams::<E1, E2>::setup(
-    &HeapifyCircuit::empty(),
-    &TrivialCircuit::default(),
-    &*default_ck_hint(),
-    &*default_ck_hint(),
-  )
-  .unwrap();
-  let (rs, ic, z0) = heapify_engine.prove_recursive(&pp).unwrap();
-  rs.verify(
+
+  let ms_err = "Multisets should be valid and input circuit should be sat";
+
+  // Prove vm execution and memory consistency
+  let (nebula_snark, U) = NebulaSNARK::prove(
     &pp,
-    rs.num_steps(),
-    &z0,
-    &[<E2 as Engine>::Scalar::zero()],
-    ic,
+    step_size,
+    (init_memory, final_memory, read_ops, write_ops),
+    heapify_engine,
   )
-  .unwrap();
-  // let ms_err = "Multisets should be valid and input circuit should be sat";
+  .expect(ms_err);
 
-  // // Prove vm execution and memory consistency
-  // let (nebula_snark, U) = NebulaSNARK::prove(
-  //   &pp,
-  //   step_size,
-  //   (init_memory, final_memory, read_ops, write_ops),
-  //   heapify_engine,
-  // )
-  // .expect(ms_err);
-
-  // // Verify vm execution and memory consistency
-  // nebula_snark.verify(&pp, &U).expect(ms_err);
+  // Verify vm execution and memory consistency
+  nebula_snark.verify(&pp, &U).expect(ms_err);
 
   // // setup and compress
   // let r1cs_err = "R1CS instance, witness pairs should be sat";
@@ -180,95 +166,86 @@ where
       |lc| lc + CS::one(),
       |lc| lc + right_child_addr.get_variable(),
     );
-
-    let (addr, val, ts) = self.RS[0];
-    let addr = AllocatedNum::alloc_pre_committed(
-      cs.namespace(|| "addr"),
-      || Ok(F::from(self.RS[0].1)),
-      Split::First,
+    let parent = self.read(cs.namespace(|| "get parent value"), &parent_node_addr, 0)?;
+    let left_child = self.read(cs.namespace(|| "get left child value"), &left_child_addr, 1)?;
+    let right_child = self.read(
+      cs.namespace(|| "get right child value"),
+      &right_child_addr,
+      2,
     )?;
-    // let ts = AllocatedNum::alloc_pre_committed(cs.namespace(|| "ts"), || Ok(F::from(ts)), idx)?;
-    // let parent = self.read(cs.namespace(|| "get parent value"), &parent_node_addr, 0)?;
-    // let left_child = self.read(cs.namespace(|| "get left child value"), &left_child_addr, 1)?;
-    // let right_child = self.read(
-    //   cs.namespace(|| "get right child value"),
-    //   &right_child_addr,
-    //   2,
-    // )?;
-    // let is_left_child_smaller = less_than(
-    //   cs.namespace(|| "left_child < parent"),
-    //   &left_child,
-    //   &parent,
-    //   MAX_BITS,
-    // )?;
-    // let new_parent_left = conditionally_select2(
-    //   cs.namespace(|| "new_left_pair_parent"),
-    //   &left_child,
-    //   &parent,
-    //   &is_left_child_smaller,
-    // )?;
-    // let new_left_child = conditionally_select2(
-    //   cs.namespace(|| "new_left_pair_child"),
-    //   &parent,
-    //   &left_child,
-    //   &is_left_child_smaller,
-    // )?;
-    // self.write(
-    //   cs.namespace(|| "write new left parent"),
-    //   &parent_node_addr,
-    //   &new_parent_left,
-    //   3,
-    // )?;
-    // self.write(
-    //   cs.namespace(|| "write new left child"),
-    //   &left_child_addr,
-    //   &new_left_child,
-    //   4,
-    // )?;
-    // let is_right_child_smaller = less_than(
-    //   cs.namespace(|| "right_child < parent"),
-    //   &right_child,
-    //   &new_parent_left,
-    //   MAX_BITS,
-    // )?;
-    // let new_parent_right = conditionally_select2(
-    //   cs.namespace(|| "new_right_pair_parent"),
-    //   &right_child,
-    //   &new_parent_left,
-    //   &is_right_child_smaller,
-    // )?;
-    // let new_right_child = conditionally_select2(
-    //   cs.namespace(|| "new_right_pair_child"),
-    //   &new_parent_left,
-    //   &right_child,
-    //   &is_right_child_smaller,
-    // )?;
-    // self.write(
-    //   cs.namespace(|| "write new right parent"),
-    //   &parent_node_addr,
-    //   &new_parent_right,
-    //   5,
-    // )?;
-    // self.write(
-    //   cs.namespace(|| "write new right child"),
-    //   &right_child_addr,
-    //   &new_right_child,
-    //   6,
-    // )?;
-    // let next_addr = AllocatedNum::alloc(cs.namespace(|| "next_addr"), || {
-    //   parent_node_addr
-    //     .get_value()
-    //     .map(|addr| addr - F::ONE)
-    //     .ok_or(SynthesisError::AssignmentMissing)
-    // })?;
-    // cs.enforce(
-    //   || "(next_addr + 1) * 1 = addr",
-    //   |lc| lc + next_addr.get_variable() + CS::one(),
-    //   |lc| lc + CS::one(),
-    //   |lc| lc + parent_node_addr.get_variable(),
-    // );
-    // Ok(vec![next_addr])
-    Ok(vec![parent_node_addr])
+    let is_left_child_smaller = less_than(
+      cs.namespace(|| "left_child < parent"),
+      &left_child,
+      &parent,
+      MAX_BITS,
+    )?;
+    let new_parent_left = conditionally_select2(
+      cs.namespace(|| "new_left_pair_parent"),
+      &left_child,
+      &parent,
+      &is_left_child_smaller,
+    )?;
+    let new_left_child = conditionally_select2(
+      cs.namespace(|| "new_left_pair_child"),
+      &parent,
+      &left_child,
+      &is_left_child_smaller,
+    )?;
+    self.write(
+      cs.namespace(|| "write new left parent"),
+      &parent_node_addr,
+      &new_parent_left,
+      3,
+    )?;
+    self.write(
+      cs.namespace(|| "write new left child"),
+      &left_child_addr,
+      &new_left_child,
+      4,
+    )?;
+    let is_right_child_smaller = less_than(
+      cs.namespace(|| "right_child < parent"),
+      &right_child,
+      &new_parent_left,
+      MAX_BITS,
+    )?;
+    let new_parent_right = conditionally_select2(
+      cs.namespace(|| "new_right_pair_parent"),
+      &right_child,
+      &new_parent_left,
+      &is_right_child_smaller,
+    )?;
+    let new_right_child = conditionally_select2(
+      cs.namespace(|| "new_right_pair_child"),
+      &new_parent_left,
+      &right_child,
+      &is_right_child_smaller,
+    )?;
+    self.write(
+      cs.namespace(|| "write new right parent"),
+      &parent_node_addr,
+      &new_parent_right,
+      5,
+    )?;
+    self.write(
+      cs.namespace(|| "write new right child"),
+      &right_child_addr,
+      &new_right_child,
+      6,
+    )?;
+    let next_addr = AllocatedNum::alloc(cs.namespace(|| "next_addr"), || {
+      parent_node_addr
+        .get_value()
+        .map(|addr| addr - F::ONE)
+        .ok_or(SynthesisError::AssignmentMissing)
+    })?;
+    cs.enforce(
+      || "(next_addr + 1) * 1 = addr",
+      |lc| lc + next_addr.get_variable() + CS::one(),
+      |lc| lc + CS::one(),
+      |lc| lc + parent_node_addr.get_variable(),
+    );
+    Ok(vec![next_addr])
   }
 
   fn arity(&self) -> usize {
@@ -276,8 +253,7 @@ where
   }
 
   fn advice(&self) -> (Vec<F>, Vec<F>) {
-    // (convert_advice(&self.RS, &self.WS), vec![])
-    (vec![F::from(self.RS[0].1)], vec![])
+    (convert_advice(&self.RS, &self.WS), vec![])
   }
 }
 

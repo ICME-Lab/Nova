@@ -284,7 +284,6 @@ where
       c_primary,
       pp.ro_consts_circuit_primary.clone(),
     );
-
     let zi_primary = circuit_primary.synthesize(&mut cs_primary)?;
     let (u_primary, w_primary) =
       cs_primary.split_r1cs_instance_and_witness(&pp.r1cs_shape_primary, &pp.ck_primary)?;
@@ -310,6 +309,7 @@ where
       pp.ro_consts_circuit_secondary.clone(),
     );
     let zi_secondary = circuit_secondary.synthesize(&mut cs_secondary)?;
+
     let (u_secondary, w_secondary) =
       cs_secondary.split_r1cs_instance_and_witness(&pp.r1cs_shape_secondary, &pp.ck_secondary)?;
 
@@ -360,7 +360,7 @@ where
       i: 0,
       zi_primary,
       zi_secondary,
-      prev_ic: (E1::Scalar::ZERO, E1::Scalar::ZERO),
+      prev_ic: IncrementalCommitment::<E1>::default(),
       prev_comm_advice: (Commitment::<E1>::default(), Commitment::<E1>::default()),
       prev_ic_secondary: (E2::Scalar::ZERO, E2::Scalar::ZERO),
     })
@@ -417,9 +417,7 @@ where
       c_primary,
       pp.ro_consts_circuit_primary.clone(),
     );
-
     let zi_primary = circuit_primary.synthesize(&mut cs_primary)?;
-
     let (l_u_primary, l_w_primary) =
       cs_primary.split_r1cs_instance_and_witness(&pp.r1cs_shape_primary, &pp.ck_primary)?;
 
@@ -448,7 +446,7 @@ where
       r_next_secondary,
       Some(l_u_primary),
       Some(nifs_primary.comm_T),
-      Some(self.prev_ic),
+      Some(ic), // we passing in the wrong value here, we need to pass the ic outputted by the previous aug circ
     );
 
     let circuit_secondary: NovaAugmentedCircuit<'_, E1, _> = NovaAugmentedCircuit::new(
@@ -458,7 +456,6 @@ where
       pp.ro_consts_circuit_secondary.clone(),
     );
     let zi_secondary = circuit_secondary.synthesize(&mut cs_secondary)?;
-
     let (l_u_secondary, l_w_secondary) = cs_secondary
       .split_r1cs_instance_and_witness(&pp.r1cs_shape_secondary, &pp.ck_secondary)
       .map_err(|_e| NovaError::UnSat)?;
@@ -554,8 +551,8 @@ where
       }
       self.r_U_primary.absorb_in_ro(&mut hasher2);
       hasher2.absorb(self.ri_secondary);
-      hasher2.absorb(scalar_as_base::<E1>(self.prev_ic.0));
-      hasher2.absorb(scalar_as_base::<E1>(self.prev_ic.1));
+      hasher2.absorb(scalar_as_base::<E1>(ic.0));
+      hasher2.absorb(scalar_as_base::<E1>(ic.1));
       (
         hasher.squeeze(NUM_HASH_BITS),
         hasher2.squeeze(NUM_HASH_BITS),
@@ -641,10 +638,7 @@ where
   circuit
     .synthesize(&mut cs)
     .map_err(|_| NovaError::from(SynthesisError::AssignmentMissing))?;
-  let is_sat = cs.is_satisfied();
-  if !is_sat {
-    assert!(is_sat);
-  }
+  assert!(cs.is_satisfied());
   Ok(())
 }
 
@@ -1710,6 +1704,7 @@ mod tests {
 
 #[cfg(test)]
 mod cc_tests {
+  use super::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK};
   use crate::{
     errors::NovaError,
     frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
@@ -1722,33 +1717,34 @@ mod cc_tests {
   };
   use ff::Field;
   use ff::PrimeField;
-
-  use super::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK};
+  use rand::{rngs::StdRng, RngCore};
+  use rand_core::SeedableRng;
 
   #[test]
   fn test_pow_rs() -> Result<(), NovaError> {
     type Fr = <Bn256EngineKZG as Engine>::Scalar;
-    let circuit = PowCircuit {
-      advice: Some((Fr::from(2u64), Fr::from(301u64))),
-    };
-    test_rs_with::<Bn256EngineKZG, GrumpkinEngine>(&circuit)
+    let mut rng = StdRng::seed_from_u64(0u64);
+    let circuits = (0..10)
+      .map(|_| PowCircuit::<Fr>::random(&mut rng))
+      .collect::<Vec<_>>();
+    test_rs_with::<Bn256EngineKZG, GrumpkinEngine>(&circuits)
   }
 
-  fn test_rs_with<E1, E2>(circuit: &impl StepCircuit<E1::Scalar>) -> Result<(), NovaError>
+  fn test_rs_with<E1, E2>(circuits: &[impl StepCircuit<E1::Scalar>]) -> Result<(), NovaError>
   where
     E1: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E1 as Engine>::Scalar>,
   {
-    run_circuit::<E1, E2>(circuit)
+    run_circuits::<E1, E2>(circuits)
   }
 
-  fn run_circuit<E1, E2>(c: &impl StepCircuit<E1::Scalar>) -> Result<(), NovaError>
+  fn run_circuits<E1, E2>(circuits: &[impl StepCircuit<E1::Scalar>]) -> Result<(), NovaError>
   where
     E1: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E1 as Engine>::Scalar>,
   {
     let pp = PublicParams::<E1, E2>::setup(
-      c,
+      &circuits[0],
       &TrivialCircuit::default(),
       &*default_ck_hint(),
       &*default_ck_hint(),
@@ -1761,22 +1757,29 @@ mod cc_tests {
 
     let mut recursive_snark = RecursiveSNARK::new(
       &pp,
-      c,
+      &circuits[0],
       &TrivialCircuit::default(),
       &z_0,
       &[<E2 as Engine>::Scalar::ZERO],
     )?;
     let mut ic = IncrementalCommitment::<E1>::default();
-    for i in 0..10 {
-      recursive_snark.prove_step(&pp, c, &TrivialCircuit::default(), ic)?;
-      let (advice_0, advice_1) = c.advice();
+    for (i, circuit) in circuits.iter().enumerate() {
+      println!("Proving step {}", i);
+      recursive_snark.prove_step(&pp, circuit, &TrivialCircuit::default(), ic)?;
+      let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,
         &pp.ro_consts_primary,
         ic,
         (&advice_0, &advice_1),
       );
-      recursive_snark.verify(&pp, i + 1, &z_0, &[<E2 as Engine>::Scalar::ZERO], ic)?;
+      recursive_snark.verify(
+        &pp,
+        recursive_snark.num_steps(),
+        &z_0,
+        &[<E2 as Engine>::Scalar::ZERO],
+        ic,
+      )?;
     }
     Ok(())
   }
@@ -1847,6 +1850,17 @@ mod cc_tests {
     fn advice(&self) -> (Vec<F>, Vec<F>) {
       let advice = self.advice.expect("Advice should manually be set");
       (vec![advice.0], vec![advice.1])
+    }
+  }
+
+  impl<F> PowCircuit<F>
+  where
+    F: PrimeField,
+  {
+    fn random(mut rng: impl RngCore) -> Self {
+      Self {
+        advice: Some((F::random(&mut rng), F::random(&mut rng))),
+      }
     }
   }
 }

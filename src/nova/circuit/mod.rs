@@ -330,12 +330,17 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
       let ic_bits = ro.squeeze(cs.namespace(|| "Input hash"), NUM_HASH_BITS)?;
       le_bits_to_num(cs.namespace(|| "bits to hash"), &ic_bits)?
     };
-    conditionally_select(
+    let new_ic = conditionally_select(
       cs.namespace(|| "select IC"),
       &prev_IC,
       &ic,
       &Boolean::from(is_base_case.clone()),
-    )
+    )?;
+    if self.params.is_primary_circuit {
+      Ok(new_ic)
+    } else {
+      Ok(ic)
+    }
   }
 }
 
