@@ -2,7 +2,7 @@ use crate::{
   errors::NovaError,
   frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
   gadgets::{nebula::allocated_avt, nonnative::util::Num, utils::conditionally_select2},
-  provider::{ipa_pc, Bn256EngineIPA, GrumpkinEngine},
+  provider::{hyperkzg, ipa_pc, Bn256EngineKZG, GrumpkinEngine},
   spartan::snark::RelaxedR1CSSNARK,
   traits::{circuit::StepCircuit, Engine},
 };
@@ -22,9 +22,9 @@ const MEMORY_OPS_PER_STEP: usize = 7;
 const MAX_BITS: usize = 32;
 
 // Basic type alias's for specifying proving curve-cycle
-type E1 = Bn256EngineIPA;
+type E1 = Bn256EngineKZG;
 type E2 = GrumpkinEngine;
-type EE1 = ipa_pc::EvaluationEngine<E1>;
+type EE1 = hyperkzg::EvaluationEngine<E1>;
 type EE2 = ipa_pc::EvaluationEngine<E2>;
 type S1 = RelaxedR1CSSNARK<E1, EE1>;
 type S2 = RelaxedR1CSSNARK<E2, EE2>;

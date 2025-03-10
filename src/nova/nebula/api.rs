@@ -398,14 +398,18 @@ where
       || init_h_ws != E1::Scalar::ONE
       || init_h_fs != E1::Scalar::ONE
     {
-      return Err(NovaError::InvalidMultisetProof);
+      return Err(NovaError::InvalidMultisetProof {
+        reason: "initial values are incorrect".to_string(),
+      });
     }
 
-    // --- 2. check Cn′ = Cn  ---
+    // --- 2. check Cn' = Cn  ---
     //
     // commitments carried in both Πops and ΠF are the same
     if U.F_ic != U.ops_ic {
-      return Err(NovaError::InvalidMultisetProof);
+      return Err(NovaError::InvalidMultisetProof {
+        reason: "Cn' != Cn".to_string(),
+      });
     }
 
     // --- 3. check γ and γ are derived by hashing C and C′′. ---
@@ -419,7 +423,9 @@ where
     let alpha = keccak.squeeze(b"alpha")?;
 
     if U.ops_z_0[0] != gamma || U.ops_z_0[1] != alpha {
-      return Err(NovaError::InvalidMultisetProof);
+      return Err(NovaError::InvalidMultisetProof {
+        reason: "gamma and alpha do not match".to_string(),
+      });
     }
 
     // --- 4. check h_IS' · h_WS' = h_RS' · h_FS'.---
@@ -427,7 +433,9 @@ where
     // Inputs for multiset check
     let (h_is, h_rs, h_ws, h_fs) = { (scan_z_i[2], ops_z_i[3], ops_z_i[4], scan_z_i[3]) };
     if h_is * h_ws != h_rs * h_fs {
-      return Err(NovaError::InvalidMultisetProof);
+      return Err(NovaError::InvalidMultisetProof {
+        reason: "h_IS' · h_WS' != h_RS' · h_FS'".to_string(),
+      });
     }
 
     Ok(())

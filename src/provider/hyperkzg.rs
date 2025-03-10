@@ -22,7 +22,9 @@ use core::{
   slice,
 };
 use ff::{Field, PrimeFieldBits};
-use rand_core::OsRng;
+use rand_chacha::ChaCha8Rng;
+use rand_core::SeedableRng;
+
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -428,7 +430,7 @@ where
 
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey {
     // NOTE: this is for testing purposes and should not be used in production
-    Self::CommitmentKey::setup_from_rng(label, n, OsRng)
+    Self::CommitmentKey::setup_from_rng(label, n, ChaCha8Rng::from_seed([0u8; 32]))
   }
 
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey {
@@ -925,6 +927,7 @@ mod tests {
   };
   use bincode::Options;
   use rand::SeedableRng;
+  use rand_core::OsRng;
 
   type E = Bn256EngineKZG;
   type Fr = <E as Engine>::Scalar;

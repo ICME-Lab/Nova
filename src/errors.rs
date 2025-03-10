@@ -48,8 +48,11 @@ pub enum NovaError {
   #[error("InternalTranscriptError")]
   InternalTranscriptError,
   /// returned when the multiset check fails
-  #[error("InvalidMultisetProof")]
-  InvalidMultisetProof,
+  #[error("InvalidMultisetProof {reason}")]
+  InvalidMultisetProof {
+    /// The reason for multiset proof failure
+    reason: String,
+  },
   /// returned when the product proof check fails
   #[error("InvalidProductProof")]
   InvalidProductProof,
