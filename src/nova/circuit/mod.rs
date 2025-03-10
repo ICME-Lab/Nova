@@ -336,6 +336,7 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
       &ic,
       &Boolean::from(is_base_case.clone()),
     )?;
+    // TODO: Fix this
     if self.params.is_primary_circuit {
       Ok(new_ic)
     } else {
