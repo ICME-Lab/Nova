@@ -1719,7 +1719,6 @@ mod cc_tests {
     provider::{Bn256EngineIPA, GrumpkinEngine},
     traits::{
       circuit::{StepCircuit, TrivialCircuit},
-      evaluation::EvaluationEngineTrait,
       Engine,
     },
   };
