@@ -288,6 +288,7 @@ where
     // --- Run the F (transition) circuit ---
     //
     // We use commitment-carrying IVC to prove the repeated execution of F
+    tracing::debug!("Execution proving");
     let (F_rs, F_ic, F_z_0) = RecursiveSNARKEngine::run(|| F_engine, pp.F())?;
 
     // --- Get challenges gamma and alpha ---
@@ -303,12 +304,14 @@ where
     )?;
 
     // Grand product checks for RS & WS
+    tracing::debug!("MCC: Incrementally computing grand products for RS & WS");
     let (ops_rs, ops_ic, ops_z_0) = RecursiveSNARKEngine::run(
       || OpsGrandProductEngine::<E1, M>::new(read_ops, write_ops, gamma, alpha, step_size),
       pp.ops(),
     )?;
 
     // Grand product checks for IS & FS
+    tracing::debug!("MCC: Incrementally computing grand products for IS & FS");
     let (scan_rs, scan_ic, scan_z_0) = RecursiveSNARKEngine::run(
       || ScanGrandProductEngine::new(init_memory, final_memory, gamma, alpha, step_size),
       pp.scan(),
@@ -519,7 +522,8 @@ where
       &[<E2 as Engine>::Scalar::ZERO],
     )?;
     let mut ic = IncrementalCommitment::<E1>::default();
-    for circuit in circuits.iter() {
+    for (i, circuit) in circuits.iter().enumerate() {
+      tracing::debug!("Proving step {}/{}", i + 1, circuits.len());
       rs.prove_step(pp, circuit, &secondary_circuit, ic)?;
       let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(

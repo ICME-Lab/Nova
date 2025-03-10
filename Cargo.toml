@@ -31,6 +31,7 @@ byteorder = "1.4.3"
 thiserror = "2.0.11"
 once_cell = "1.18.0"
 itertools = "0.14.0"
+tracing = { version = "0.1.40", features = ["log"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.15", default-features = false, features = ["js"] }
