@@ -1710,6 +1710,7 @@ mod tests {
 #[cfg(test)]
 mod cc_tests {
   use super::{ic::increment_ic, IncrementalCommitment, PublicParams, RecursiveSNARK};
+  use crate::provider::Bn256EngineKZG;
   use crate::traits::snark::RelaxedR1CSSNARKTrait;
   use crate::{
     errors::NovaError,
@@ -1728,47 +1729,64 @@ mod cc_tests {
   use rand_core::SeedableRng;
 
   type EE<E> = crate::provider::ipa_pc::EvaluationEngine<E>;
+  type EEPrime<E> = crate::provider::hyperkzg::EvaluationEngine<E>;
   type S<E, EE> = crate::spartan::snark::RelaxedR1CSSNARK<E, EE>;
   type SPrime<E, EE> = crate::spartan::ppsnark::RelaxedR1CSSNARK<E, EE>;
 
   #[test]
   fn test_pow_rs() -> Result<(), NovaError> {
-    type Fr = <Bn256EngineIPA as Engine>::Scalar;
     type E1 = Bn256EngineIPA;
+    type Fr = <E1 as Engine>::Scalar;
     type E2 = GrumpkinEngine;
+    type S1 = S<E1, EE<E1>>;
+    type S2 = S<E2, EE<E2>>;
     let mut rng = StdRng::seed_from_u64(0u64);
     let circuits = (0..10)
       .map(|_| PowCircuit::<Fr>::random(&mut rng))
       .collect::<Vec<_>>();
-    test_rs_with::<E1, E2, EE<E1>, EE<E2>>(&circuits)
+    test_rs_with::<E1, E2, S1, S2>(&circuits)
   }
 
-  fn test_rs_with<E1, E2, EE1, EE2>(
+  #[test]
+  fn test_spark_pow_rs() -> Result<(), NovaError> {
+    type E1 = Bn256EngineKZG;
+    type E2 = GrumpkinEngine;
+    type Fr = <E1 as Engine>::Scalar;
+    type S1 = SPrime<E1, EEPrime<E1>>;
+    type S2 = SPrime<E2, EE<E2>>;
+    let mut rng = StdRng::seed_from_u64(0u64);
+    let circuits = (0..10)
+      .map(|_| PowCircuit::<Fr>::random(&mut rng))
+      .collect::<Vec<_>>();
+    test_rs_with::<E1, E2, S1, S2>(&circuits)
+  }
+
+  fn test_rs_with<E1, E2, S1, S2>(
     circuits: &[impl StepCircuit<E1::Scalar>],
   ) -> Result<(), NovaError>
   where
     E1: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E1 as Engine>::Scalar>,
-    EE1: EvaluationEngineTrait<E1>,
-    EE2: EvaluationEngineTrait<E2>,
+    S1: RelaxedR1CSSNARKTrait<E1>,
+    S2: RelaxedR1CSSNARKTrait<E2>,
   {
-    run_circuits::<E1, E2, EE1, EE2>(circuits)
+    run_circuits::<E1, E2, S1, S2>(circuits)
   }
 
-  fn run_circuits<E1, E2, EE1, EE2>(
+  fn run_circuits<E1, E2, S1, S2>(
     circuits: &[impl StepCircuit<E1::Scalar>],
   ) -> Result<(), NovaError>
   where
     E1: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E1 as Engine>::Scalar>,
-    EE1: EvaluationEngineTrait<E1>,
-    EE2: EvaluationEngineTrait<E2>,
+    S1: RelaxedR1CSSNARKTrait<E1>,
+    S2: RelaxedR1CSSNARKTrait<E2>,
   {
     let pp = PublicParams::<E1, E2>::setup(
       &circuits[0],
       &TrivialCircuit::default(),
-      &*SPrime::<E1, EE1>::ck_floor(),
-      &*SPrime::<E2, EE2>::ck_floor(),
+      &*S1::ck_floor(),
+      &*S2::ck_floor(),
     )?;
     let z_0 = vec![
       E1::Scalar::from(2u64),
@@ -1802,12 +1820,11 @@ mod cc_tests {
       )?;
     }
     // produce the prover and verifier keys for compressed snark
-    let (pk, vk) = CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::setup(&pp).unwrap();
+    let (pk, vk) = CompressedSNARK::<_, _, S1, S2>::setup(&pp).unwrap();
 
     // produce a compressed SNARK
     let compressed_snark =
-      CompressedSNARK::<_, _, S<E1, EE1>, S<E2, EE2>>::prove(&pp, &pk, &recursive_snark, ic)
-        .unwrap();
+      CompressedSNARK::<_, _, S1, S2>::prove(&pp, &pk, &recursive_snark, ic).unwrap();
 
     // verify the compressed SNARK
     compressed_snark
