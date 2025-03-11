@@ -1101,13 +1101,13 @@ mod tests {
     test_pp_digest_with::<Bn256EngineIPA, GrumpkinEngine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["55333a2332c3ac386e254c8cdb3297909a059a3dd09156037114b53adb78cb00"],
+      &expect!["bffd1dcc2f51c0eac048d3e016b5d07f0d73cfb7cc643f744f73e6458ab6ce02"],
     );
 
     test_pp_digest_with::<Secp256k1Engine, Secq256k1Engine, _, _>(
       &TrivialCircuit::<_>::default(),
       &TrivialCircuit::<_>::default(),
-      &expect!["1e22e740019b29dbde754cfa32b1bf576d3517c3481c008d66e11bc3c2161f01"],
+      &expect!["f5093caccac32bbad637d0793d95f0dd6a04f3097f5d1627cda4c7250e8d5003"],
     );
   }
 
