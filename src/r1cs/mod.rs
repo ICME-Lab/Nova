@@ -395,9 +395,7 @@ impl<E: Engine> R1CSShape<E> {
       .map(|(((az, bz), cz), e)| *az * *bz - u * *cz - *e)
       .collect::<Vec<E::Scalar>>();
 
-    let time = Instant::now();
     let comm_T = CE::<E>::commit(ck, &T, r_T);
-    println!("Commitment time: {:?}", time.elapsed());
 
     Ok((T, comm_T))
   }
