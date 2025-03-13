@@ -226,11 +226,9 @@ mod tests {
     },
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::SparseMatrix,
-    r1cs::{
-      R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness, SparseMatrix, R1CS,
-    },
+    r1cs::{R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
+    traits::ROConstants,
     traits::{commitment::CommitmentEngineTrait, snark::default_ck_hint, Engine},
-    traits::{commitment::CommitmentEngineTrait, snark::default_ck_hint, Engine, ROConstants},
   };
   use ff::{Field, PrimeField};
   use rand::rngs::OsRng;

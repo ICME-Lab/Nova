@@ -123,8 +123,7 @@ where
   /// PublicParams::setup(&circuit, ck_hint1, ck_hint2);
   /// ```
   pub fn setup(
-    c_primary: &impl StepCircuit<E1::Scalar>,
-    c_secondary: &impl StepCircuit<E2::Scalar>,
+    c: &impl StepCircuit<E1::Scalar>,
     ck_hint1: &CommitmentKeyHint<E1>,
     ck_hint2: &CommitmentKeyHint<E2>,
   ) -> Result<Self, NovaError> {
@@ -138,12 +137,8 @@ where
     let ro_consts_circuit_secondary: ROConstantsCircuit<E1> = ROConstantsCircuit::<E1>::default();
 
     // Initialize ck for the primary
-    let circuit_primary: NovaAugmentedCircuit<'_, E2, _> = NovaAugmentedCircuit::new(
-      &augmented_circuit_params_primary,
-      None,
-      c_primary,
-      ro_consts_circuit_primary.clone(),
-    );
+    let circuit_primary: NovaAugmentedCircuit<'_, E2, _> =
+      NovaAugmentedCircuit::new(true, None, c, ro_consts_circuit_primary.clone());
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint1);
@@ -244,12 +239,12 @@ where
   /// Create new instance of recursive SNARK
   pub fn new(
     pp: &PublicParams<E1, E2>,
-    c_primary: &impl StepCircuit<E1::Scalar>,
+    c: &impl StepCircuit<E1::Scalar>,
     c_secondary: &impl StepCircuit<E2::Scalar>,
     z0_primary: &[E1::Scalar],
     z0_secondary: &[E2::Scalar],
   ) -> Result<Self, NovaError> {
-    if z0_primary.len() != pp.F_arity_primary || z0_secondary.len() != pp.F_arity_secondary {
+    if z0_primary.len() != pp.F_arity || z0_secondary.len() != pp.F_arity_secondary {
       return Err(NovaError::InvalidInitialInputLength);
     }
 
@@ -362,7 +357,7 @@ where
   pub fn prove_step(
     &mut self,
     pp: &PublicParams<E1, E2>,
-    c_primary: &impl StepCircuit<E1::Scalar>,
+    c: &impl StepCircuit<E1::Scalar>,
     c_secondary: &impl StepCircuit<E2::Scalar>,
     ic: IncrementalCommitment<E1>,
   ) -> Result<(), NovaError> {

@@ -19,6 +19,7 @@ use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 
 mod sparse;
 pub(crate) use sparse::SparseMatrix;
@@ -267,9 +268,17 @@ impl<E: Engine> R1CSShape<E> {
       U.aux.comm_W == comm_W && U.aux.comm_E == comm_E
     };
 
-    if !(res_eq && res_comm) {
-      return Err(NovaError::UnSat);
-    };
+    if !res_eq {
+      return Err(NovaError::UnSat {
+        reason: "R1CS is unsatisfiable".to_string(),
+      });
+    }
+
+    if !res_comm {
+      return Err(NovaError::UnSat {
+        reason: "Invalid commitment".to_string(),
+      });
+    }
 
     if U.precommitted
       != (
@@ -282,7 +291,9 @@ impl<E: Engine> R1CSShape<E> {
         ),
       )
     {
-      return Err(NovaError::UnSat);
+      return Err(NovaError::UnSat {
+        reason: "Invalid precommitments".to_string(),
+      });
     }
     Ok(())
   }
@@ -357,8 +368,16 @@ impl<E: Engine> R1CSShape<E> {
         self.num_precommits.0 + self.num_precommits.1,
       );
 
-    if !(res_eq && res_comm) {
-      return Err(NovaError::UnSat);
+    if !res_eq {
+      return Err(NovaError::UnSat {
+        reason: "R1CS is unsatisfiable".to_string(),
+      });
+    }
+
+    if !res_comm {
+      return Err(NovaError::UnSat {
+        reason: "Invalid commitment".to_string(),
+      });
     }
 
     if U.precommitted
@@ -372,58 +391,9 @@ impl<E: Engine> R1CSShape<E> {
         ),
       )
     {
-      return Err(NovaError::UnSat);
-    }
-    Ok(())
-  }
-
-  /// Checks if the R1CS instance is satisfiable given a witness and its shape
-  pub fn is_sat_split(
-    &self,
-    ck: &CommitmentKey<E>,
-    U: &SplitR1CSInstance<E>,
-    W: &SplitR1CSWitness<E>,
-  ) -> Result<(), NovaError> {
-    let witness_vec = W.clone_W();
-    assert_eq!(witness_vec.len(), self.num_vars);
-    assert_eq!(U.aux.X.len(), self.num_io);
-
-    // verify if Az * Bz = u*Cz
-    let res_eq = {
-      let z = [witness_vec, vec![E::Scalar::ONE], U.aux.X.clone()].concat();
-      let (Az, Bz, Cz) = self.multiply_vec(&z)?;
-      assert_eq!(Az.len(), self.num_cons);
-      assert_eq!(Bz.len(), self.num_cons);
-      assert_eq!(Cz.len(), self.num_cons);
-
-      (0..self.num_cons).all(|i| Az[i] * Bz[i] == Cz[i])
-    };
-
-    // verify if comm_W is a commitment to W
-    let res_comm = U.aux.comm_W
-      == CE::<E>::commit_at(
-        ck,
-        &W.aux.W,
-        &W.aux.r_W,
-        self.num_precommits.0 + self.num_precommits.1,
-      );
-
-    if !(res_eq && res_comm) {
-      return Err(NovaError::UnSat);
-    }
-
-    if U.precommitted
-      != (
-        CE::<E>::commit(ck, &W.precommitted.0, &E::Scalar::ZERO),
-        CE::<E>::commit_at(
-          ck,
-          &W.precommitted.1,
-          &E::Scalar::ZERO,
-          self.num_precommits.0,
-        ),
-      )
-    {
-      return Err(NovaError::UnSat);
+      return Err(NovaError::UnSat {
+        reason: "Invalid precommitments".to_string(),
+      });
     }
     Ok(())
   }
@@ -653,14 +623,6 @@ impl<E: Engine> R1CSWitness<E> {
   /// Commits to the witness using the supplied generators
   pub fn commit(&self, ck: &CommitmentKey<E>, num_precommits: (usize, usize)) -> Commitment<E> {
     CE::<E>::commit_at(ck, &self.W, &self.r_W, num_precommits.0 + num_precommits.1)
-  }
-
-  /// Pads the provided witness to the correct length
-  pub fn pad(&self, S: &R1CSShape<E>) -> R1CSWitness<E> {
-    let mut W = self.W.clone();
-    W.extend(vec![E::Scalar::ZERO; S.num_vars - W.len()]);
-
-    Self { W, r_W: self.r_W }
   }
 
   /// Pads the provided witness to the correct length

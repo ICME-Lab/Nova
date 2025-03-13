@@ -193,7 +193,7 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
     )?;
     let prev_ic = (prev_ic0, prev_ic1);
 
-    Ok((params, i, z_0, z_i, U, r_i, r_next, u, T, prev_ic))
+    Ok((pp_digest, i, z_0, z_i, U, r_i, r_next, u, T, prev_ic))
   }
 
   fn synthesize_hash_check<CS: ConstraintSystem<E::Base>>(
@@ -311,7 +311,7 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
       &Boolean::from(is_base_case.clone()),
     )?;
     // TODO: Fix this
-    if self.params.is_primary_circuit {
+    if self.is_primary_circuit {
       Ok(new_ic)
     } else {
       Ok(ic)
@@ -328,7 +328,7 @@ impl<E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'_, E, SC> {
     let arity = self.step_circuit.arity();
 
     // Allocate all witnesses
-    let (params, i, z_0, z_i, U, r_i, r_next, u, T, prev_ic) =
+    let (pp_digest, i, z_0, z_i, U, r_i, r_next, u, T, prev_ic) =
       self.alloc_witness(cs.namespace(|| "allocate the circuit witness"), arity)?;
 
     // Compute variable indicating if this is the base case
@@ -344,6 +344,7 @@ impl<E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'_, E, SC> {
       &z_i,
       &U,
       &r_i,
+      &prev_ic,
     )?;
 
     let check_non_base_pass = alloc_num_equals(
@@ -363,7 +364,6 @@ impl<E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'_, E, SC> {
       &U,
       &u,
       &T,
-      &prev_ic,
     )?;
 
     // Either check_non_base_pass=true or we are in the base case
@@ -432,6 +432,7 @@ impl<E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'_, E, SC> {
       &z_next,
       &Unew,
       &r_next,
+      &ic,
     )?;
 
     // Outputs the computed hash and u.X[1] that corresponds to the hash of the other circuit
