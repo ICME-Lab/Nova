@@ -11,7 +11,7 @@ use crate::{
     RecursiveSNARK, VerifierKey,
   },
   traits::{
-    circuit::{StepCircuit, TrivialCircuit},
+    circuit::StepCircuit,
     snark::{default_ck_hint, RelaxedR1CSSNARKTrait},
     Engine, TranscriptEngineTrait,
   },

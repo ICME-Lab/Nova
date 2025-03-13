@@ -1564,10 +1564,7 @@ mod cc_tests {
     frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
     nova::CompressedSNARK,
     provider::{Bn256EngineIPA, GrumpkinEngine},
-    traits::{
-      circuit::{StepCircuit, TrivialCircuit},
-      Engine,
-    },
+    traits::{circuit::StepCircuit, Engine},
   };
 
   use ff::PrimeField;
