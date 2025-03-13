@@ -213,8 +213,7 @@ where
   E1: Engine<Base = <E2 as Engine>::Scalar>,
   E2: Engine<Base = <E1 as Engine>::Scalar>,
 {
-  z0_primary: Vec<E1::Scalar>,
-  z0_secondary: Vec<E2::Scalar>,
+  z0: Vec<E1::Scalar>,
   r_W_primary: SplitRelaxedR1CSWitness<E1>,
   r_U_primary: SplitRelaxedR1CSInstance<E1>,
   ri_primary: E1::Scalar,
@@ -224,8 +223,7 @@ where
   l_w_secondary: SplitR1CSWitness<E2>,
   l_u_secondary: SplitR1CSInstance<E2>,
   i: usize,
-  zi_primary: Vec<E1::Scalar>,
-  zi_secondary: Vec<E2::Scalar>,
+  zi: Vec<E1::Scalar>,
   prev_ic: IncrementalCommitment<E1>,
   prev_comm_advice: (Commitment<E1>, Commitment<E1>),
   prev_ic_secondary: IncrementalCommitment<E2>,
@@ -240,11 +238,9 @@ where
   pub fn new(
     pp: &PublicParams<E1, E2>,
     c: &impl StepCircuit<E1::Scalar>,
-    c_secondary: &impl StepCircuit<E2::Scalar>,
-    z0_primary: &[E1::Scalar],
-    z0_secondary: &[E2::Scalar],
+    z0: &[E1::Scalar],
   ) -> Result<Self, NovaError> {
-    if z0_primary.len() != pp.F_arity || z0_secondary.len() != pp.F_arity_secondary {
+    if z0.len() != pp.F_arity {
       return Err(NovaError::InvalidInitialInputLength);
     }
 
@@ -266,7 +262,7 @@ where
       None,
     );
 
-    let circuit_primary: NovaAugmentedCircuit<'_, E2, C> = NovaAugmentedCircuit::new(
+    let circuit_primary: NovaAugmentedCircuit<'_, E2, _> = NovaAugmentedCircuit::new(
       true,
       Some(inputs_primary),
       c,
@@ -358,7 +354,6 @@ where
     &mut self,
     pp: &PublicParams<E1, E2>,
     c: &impl StepCircuit<E1::Scalar>,
-    c_secondary: &impl StepCircuit<E2::Scalar>,
     ic: IncrementalCommitment<E1>,
   ) -> Result<(), NovaError> {
     // first step was already done in the constructor
@@ -542,8 +537,8 @@ where
       )
     };
 
-    if hash_primary != self.l_u_secondary.X()[0]
-      || hash_secondary != scalar_as_base::<E2>(self.l_u_secondary.X()[1])
+    if hash_primary != scalar_as_base::<E2>(self.l_u_secondary.X()[0])
+      || hash_secondary != self.l_u_secondary.X()[1]
     {
       return Err(NovaError::ProofVerifyError {
         reason: "Invalid output hash in R1CS instances".to_string(),
@@ -911,8 +906,8 @@ where
       )
     };
 
-    if hash_primary != self.l_u_secondary.aux.X[0]
-      || hash_secondary != scalar_as_base::<E2>(self.l_u_secondary.aux.X[1])
+    if hash_primary != base_as_scalar::<E1>(self.l_u_secondary.aux.X[0])
+      || hash_secondary != self.l_u_secondary.aux.X[1]
     {
       return Err(NovaError::ProofVerifyError {
         reason: "Invalid output hash in R1CS instances".to_string(),
@@ -1060,7 +1055,7 @@ mod tests {
     // this tests public parameters with a size specifically intended for a spark-compressed SNARK
     let ck_hint1 = &*SPrime::<E1, EE<E1>>::ck_floor();
     let ck_hint2 = &*SPrime::<E2, EE<E2>>::ck_floor();
-    let pp = PublicParams::<E1, E2>::setup(circuit1, circuit2, ck_hint1, ck_hint2).unwrap();
+    let pp = PublicParams::<E1, E2>::setup(circuit, ck_hint1, ck_hint2).unwrap();
 
     let digest_str = pp
       .digest()
@@ -1078,20 +1073,17 @@ mod tests {
   fn test_pp_digest() {
     test_pp_digest_with::<PallasEngine, VestaEngine, _>(
       &TrivialCircuit::<_>::default(),
-      &TrivialCircuit::<_>::default(),
-      &expect!["768d8cd5634dd8b0f8f1fb1eaaf3726890bc8da8bb1e239a5b57acc0160c9f02"],
+      &expect!["0d42de7579b1c05223b50068732dd26c5ea4b909f01c9a25735d9a8c9f8c4f01"],
     );
 
     test_pp_digest_with::<Bn256EngineIPA, GrumpkinEngine, _>(
       &TrivialCircuit::<_>::default(),
-      &TrivialCircuit::<_>::default(),
-      &expect!["bffd1dcc2f51c0eac048d3e016b5d07f0d73cfb7cc643f744f73e6458ab6ce02"],
+      &expect!["e9af62f0f80b6fe377c2af8bf4000905a5e5fca7f78b85dfdd2b8407d633c901"],
     );
 
     test_pp_digest_with::<Secp256k1Engine, Secq256k1Engine, _>(
       &TrivialCircuit::<_>::default(),
-      &TrivialCircuit::<_>::default(),
-      &expect!["f5093caccac32bbad637d0793d95f0dd6a04f3097f5d1627cda4c7250e8d5003"],
+      &expect!["3228d7daaff755648d8d1ce32485b76067a0c7abb6d3d7514f663e3650d65102"],
     );
   }
 
@@ -1114,7 +1106,7 @@ mod tests {
 
     let mut ic = IncrementalCommitment::<E1>::default();
     let res = recursive_snark.prove_step(&pp, &test_circuit, ic);
-    let (advice_0, advice_1) = test_circuit1.advice();
+    let (advice_0, advice_1) = test_circuit.advice();
     ic = increment_ic::<E1, E2>(
       &pp.ck_primary,
       &pp.ro_consts_primary,
@@ -1124,13 +1116,7 @@ mod tests {
     assert!(res.is_ok());
 
     // verify the recursive SNARK
-    let res = recursive_snark.verify(
-      &pp,
-      num_steps,
-      &[<E1 as Engine>::Scalar::ZERO],
-      &[<E2 as Engine>::Scalar::ZERO],
-      ic,
-    );
+    let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO], ic);
     assert!(res.is_ok());
   }
 
@@ -1149,31 +1135,21 @@ mod tests {
     let circuit = CubicCircuit::default();
 
     // produce public parameters
-    let pp = PublicParams::<E1, E2>::setup(
-      &circuit_primary,
-      &circuit_secondary,
-      &*default_ck_hint(),
-      &*default_ck_hint(),
-    )
-    .unwrap();
+    let pp =
+      PublicParams::<E1, E2>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint()).unwrap();
 
     let num_steps = 3;
 
     // produce a recursive SNARK
-    let mut recursive_snark = RecursiveSNARK::<
-      E1,
-      E2,
-      TrivialCircuit<<E1 as Engine>::Scalar>,
-      CubicCircuit<<E2 as Engine>::Scalar>,
-    >::new(&pp, &circuit, &[<E1 as Engine>::Scalar::ZERO])
-    .unwrap();
+    let mut recursive_snark =
+      RecursiveSNARK::<E1, E2>::new(&pp, &circuit, &[<E1 as Engine>::Scalar::ZERO]).unwrap();
 
     let mut ic = IncrementalCommitment::<E1>::default();
     for i in 0..num_steps {
       recursive_snark
-        .prove_step(&pp, &circuit_primary, &circuit_secondary, ic)
+        .prove_step(&pp, &circuit, ic)
         .expect("IVC proof should be sat");
-      let (advice_0, advice_1) = circuit_primary.advice();
+      let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,
         &pp.ro_consts_primary,
@@ -1183,24 +1159,12 @@ mod tests {
 
       // verify the recursive snark at each step of recursion
       recursive_snark
-        .verify(
-          &pp,
-          i + 1,
-          &[<E1 as Engine>::Scalar::ONE],
-          &[<E2 as Engine>::Scalar::ZERO],
-          ic,
-        )
+        .verify(&pp, i + 1, &[<E1 as Engine>::Scalar::ZERO], ic)
         .expect("IVC proof should be sat");
     }
 
     // verify the recursive SNARK
-    let res = recursive_snark.verify(
-      &pp,
-      num_steps,
-      &[<E1 as Engine>::Scalar::ONE],
-      &[<E2 as Engine>::Scalar::ZERO],
-      ic,
-    );
+    let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO], ic);
     assert!(res.is_ok());
 
     let zn = res.unwrap();
@@ -1231,29 +1195,19 @@ mod tests {
     let circuit = CubicCircuit::default();
 
     // produce public parameters
-    let pp = PublicParams::<E1, E2>::setup(
-      &circuit_primary,
-      &circuit_secondary,
-      &*default_ck_hint(),
-      &*default_ck_hint(),
-    )
-    .unwrap();
+    let pp =
+      PublicParams::<E1, E2>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint()).unwrap();
 
     let num_steps = 3;
 
     // produce a recursive SNARK
-    let mut recursive_snark = RecursiveSNARK::<
-      E1,
-      E2,
-      TrivialCircuit<<E1 as Engine>::Scalar>,
-      CubicCircuit<<E2 as Engine>::Scalar>,
-    >::new(&pp, &circuit, &[<E1 as Engine>::Scalar::ZERO])
-    .unwrap();
+    let mut recursive_snark =
+      RecursiveSNARK::<E1, E2>::new(&pp, &circuit, &[<E1 as Engine>::Scalar::ZERO]).unwrap();
 
     let mut ic = IncrementalCommitment::<E1>::default();
     for _i in 0..num_steps {
-      let res = recursive_snark.prove_step(&pp, &circuit_primary, &circuit_secondary, ic);
-      let (advice_0, advice_1) = circuit_primary.advice();
+      let res = recursive_snark.prove_step(&pp, &circuit, ic);
+      let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,
         &pp.ro_consts_primary,
@@ -1264,13 +1218,7 @@ mod tests {
     }
 
     // verify the recursive SNARK
-    let res = recursive_snark.verify(
-      &pp,
-      num_steps,
-      &[<E1 as Engine>::Scalar::ONE],
-      &[<E2 as Engine>::Scalar::ZERO],
-      ic,
-    );
+    let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO], ic);
     assert!(res.is_ok());
 
     let zn = res.unwrap();
@@ -1323,8 +1271,7 @@ mod tests {
 
     // produce public parameters, which we'll use with a spark-compressed SNARK
     let pp = PublicParams::<E1, E2>::setup(
-      &circuit_primary,
-      &circuit_secondary,
+      &circuit,
       &*SPrime::<E1, EE1>::ck_floor(),
       &*SPrime::<E2, EE2>::ck_floor(),
     )
@@ -1333,18 +1280,13 @@ mod tests {
     let num_steps = 3;
 
     // produce a recursive SNARK
-    let mut recursive_snark = RecursiveSNARK::<
-      E1,
-      E2,
-      TrivialCircuit<<E1 as Engine>::Scalar>,
-      CubicCircuit<<E2 as Engine>::Scalar>,
-    >::new(&pp, &circuit, &[<E1 as Engine>::Scalar::ZERO])
-    .unwrap();
+    let mut recursive_snark =
+      RecursiveSNARK::<E1, E2>::new(&pp, &circuit, &[<E1 as Engine>::Scalar::ZERO]).unwrap();
 
     let mut ic = IncrementalCommitment::<E1>::default();
     for _i in 0..num_steps {
-      let res = recursive_snark.prove_step(&pp, &circuit_primary, &circuit_secondary, ic);
-      let (advice_0, advice_1) = circuit_primary.advice();
+      let res = recursive_snark.prove_step(&pp, &circuit, ic);
+      let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,
         &pp.ro_consts_primary,
@@ -1355,13 +1297,7 @@ mod tests {
     }
 
     // verify the recursive SNARK
-    let res = recursive_snark.verify(
-      &pp,
-      num_steps,
-      &[<E1 as Engine>::Scalar::ONE],
-      &[<E2 as Engine>::Scalar::ZERO],
-      ic,
-    );
+    let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO], ic);
     assert!(res.is_ok());
 
     let zn = res.unwrap();
@@ -1475,13 +1411,8 @@ mod tests {
     };
 
     // produce public parameters
-    let pp = PublicParams::<E1, E2>::setup(
-      &circuit_primary,
-      &circuit_secondary,
-      &*default_ck_hint(),
-      &*default_ck_hint(),
-    )
-    .unwrap();
+    let pp =
+      PublicParams::<E1, E2>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint()).unwrap();
 
     let num_steps = 3;
 
@@ -1489,18 +1420,12 @@ mod tests {
     let (z0, roots) = FifthRootCheckingCircuit::new(num_steps);
 
     // produce a recursive SNARK
-    let mut recursive_snark: RecursiveSNARK<E1, E2> = RecursiveSNARK::<E1, E2>::new(
-      &pp,
-      &roots[0],
-      &circuit_secondary,
-      &z0_primary,
-      &z0_secondary,
-    )
-    .unwrap();
+    let mut recursive_snark: RecursiveSNARK<E1, E2> =
+      RecursiveSNARK::<E1, E2>::new(&pp, &roots[0], &z0).unwrap();
 
     let mut ic = IncrementalCommitment::<E1>::default();
     for circuit_primary in roots.iter().take(num_steps) {
-      let res = recursive_snark.prove_step(&pp, circuit_primary, &circuit_secondary, ic);
+      let res = recursive_snark.prove_step(&pp, circuit_primary, ic);
       let (advice_0, advice_1) = circuit_primary.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,
@@ -1512,7 +1437,7 @@ mod tests {
     }
 
     // verify the recursive SNARK
-    let res = recursive_snark.verify(&pp, num_steps, &z0_primary, &z0_secondary, ic);
+    let res = recursive_snark.verify(&pp, num_steps, &z0, ic);
     assert!(res.is_ok());
 
     // produce the prover and verifier keys for compressed snark
@@ -1544,28 +1469,19 @@ mod tests {
     let test_circuit1 = CubicCircuit::<<E1 as Engine>::Scalar>::default();
 
     // produce public parameters
-    let pp = PublicParams::<
-      E1,
-      E2,
-      TrivialCircuit<<E1 as Engine>::Scalar>,
-      CubicCircuit<<E2 as Engine>::Scalar>,
-    >::setup(&test_circuit1, &*default_ck_hint(), &*default_ck_hint())
-    .unwrap();
+    let pp =
+      PublicParams::<E1, E2>::setup(&test_circuit1, &*default_ck_hint(), &*default_ck_hint())
+        .unwrap();
 
     let num_steps = 1;
 
     // produce a recursive SNARK
-    let mut recursive_snark = RecursiveSNARK::<
-      E1,
-      E2,
-      TrivialCircuit<<E1 as Engine>::Scalar>,
-      CubicCircuit<<E2 as Engine>::Scalar>,
-    >::new(&pp, &test_circuit1, &[<E1 as Engine>::Scalar::ZERO])
-    .unwrap();
+    let mut recursive_snark =
+      RecursiveSNARK::<E1, E2>::new(&pp, &test_circuit1, &[<E1 as Engine>::Scalar::ZERO]).unwrap();
 
     let mut ic = IncrementalCommitment::<E1>::default();
     // produce a recursive SNARK
-    let res = recursive_snark.prove_step(&pp, &test_circuit1, &test_circuit2, ic);
+    let res = recursive_snark.prove_step(&pp, &test_circuit1, ic);
     let (advice_0, advice_1) = test_circuit1.advice();
     ic = increment_ic::<E1, E2>(
       &pp.ck_primary,
@@ -1577,13 +1493,7 @@ mod tests {
     assert!(res.is_ok());
 
     // verify the recursive SNARK
-    let res = recursive_snark.verify(
-      &pp,
-      num_steps,
-      &[<E1 as Engine>::Scalar::ONE],
-      &[<E2 as Engine>::Scalar::ZERO],
-      ic,
-    );
+    let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO], ic);
     assert!(res.is_ok());
 
     let zn = res.unwrap();
@@ -1627,23 +1537,13 @@ mod tests {
 
     // produce public parameters with trivial secondary
     let circuit = CircuitWithInputize::<<E1 as Engine>::Scalar>::default();
-    let pp = PublicParams::<E1, E2>::setup(
-      &circuit,
-      &TrivialCircuit::default(),
-      &*default_ck_hint(),
-      &*default_ck_hint(),
-    );
+    let pp = PublicParams::<E1, E2>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint());
     assert!(pp.is_err());
     assert_eq!(pp.err(), Some(NovaError::InvalidStepCircuitIO));
 
     // produce public parameters with the trivial primary
-    let circuit = CircuitWithInputize::<E2::Scalar>::default();
-    let pp = PublicParams::<E1, E2>::setup(
-      &TrivialCircuit::default(),
-      &circuit,
-      &*default_ck_hint(),
-      &*default_ck_hint(),
-    );
+    let circuit = CircuitWithInputize::<E1::Scalar>::default();
+    let pp = PublicParams::<E1, E2>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint());
     assert!(pp.is_err());
     assert_eq!(pp.err(), Some(NovaError::InvalidStepCircuitIO));
   }
@@ -1669,7 +1569,7 @@ mod cc_tests {
       Engine,
     },
   };
-  use ff::Field;
+
   use ff::PrimeField;
   use rand::{rngs::StdRng, RngCore};
   use rand_core::SeedableRng;
@@ -1728,28 +1628,17 @@ mod cc_tests {
     S1: RelaxedR1CSSNARKTrait<E1>,
     S2: RelaxedR1CSSNARKTrait<E2>,
   {
-    let pp = PublicParams::<E1, E2>::setup(
-      &circuits[0],
-      &TrivialCircuit::default(),
-      &*S1::ck_floor(),
-      &*S2::ck_floor(),
-    )?;
+    let pp = PublicParams::<E1, E2>::setup(&circuits[0], &*S1::ck_floor(), &*S2::ck_floor())?;
     let z_0 = vec![
       E1::Scalar::from(2u64),
       E1::Scalar::from(0u64),
       E1::Scalar::from(0u64),
     ];
 
-    let mut recursive_snark = RecursiveSNARK::new(
-      &pp,
-      &circuits[0],
-      &TrivialCircuit::default(),
-      &z_0,
-      &[<E2 as Engine>::Scalar::ZERO],
-    )?;
+    let mut recursive_snark = RecursiveSNARK::new(&pp, &circuits[0], &z_0)?;
     let mut ic = IncrementalCommitment::<E1>::default();
     for circuit in circuits.iter() {
-      recursive_snark.prove_step(&pp, circuit, &TrivialCircuit::default(), ic)?;
+      recursive_snark.prove_step(&pp, circuit, ic)?;
       let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,
@@ -1757,13 +1646,7 @@ mod cc_tests {
         ic,
         (&advice_0, &advice_1),
       );
-      recursive_snark.verify(
-        &pp,
-        recursive_snark.num_steps(),
-        &z_0,
-        &[<E2 as Engine>::Scalar::ZERO],
-        ic,
-      )?;
+      recursive_snark.verify(&pp, recursive_snark.num_steps(), &z_0, ic)?;
     }
     // produce the prover and verifier keys for compressed snark
     let (pk, vk) = CompressedSNARK::<_, _, S1, S2>::setup(&pp).unwrap();
@@ -1774,12 +1657,7 @@ mod cc_tests {
 
     // verify the compressed SNARK
     compressed_snark
-      .verify(
-        &vk,
-        recursive_snark.num_steps(),
-        &z_0,
-        &[<E2 as Engine>::Scalar::ZERO],
-      )
+      .verify(&vk, recursive_snark.num_steps(), &z_0)
       .unwrap();
     Ok(())
   }

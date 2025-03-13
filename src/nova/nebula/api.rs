@@ -177,24 +177,9 @@ where
     vk: &NebulaVerifierKey<E1, E2, S1, S2>,
     U: &NebulaInstance<E1>,
   ) -> Result<(Vec<E1::Scalar>, Vec<E1::Scalar>), NovaError> {
-    self.F.verify(
-      &vk.F,
-      U.F_num_steps,
-      &U.F_z_0,
-      &[<E2 as Engine>::Scalar::ZERO],
-    )?;
-    let (ops_z_i, _) = self.ops.verify(
-      &vk.ops,
-      U.ops_num_steps,
-      &U.ops_z_0,
-      &[<E2 as Engine>::Scalar::ZERO],
-    )?;
-    let (scan_z_i, _) = self.scan.verify(
-      &vk.scan,
-      U.scan_num_steps,
-      &U.scan_z_0,
-      &[<E2 as Engine>::Scalar::ZERO],
-    )?;
+    self.F.verify(&vk.F, U.F_num_steps, &U.F_z_0)?;
+    let ops_z_i = self.ops.verify(&vk.ops, U.ops_num_steps, &U.ops_z_0)?;
+    let scan_z_i = self.scan.verify(&vk.scan, U.scan_num_steps, &U.scan_z_0)?;
     Ok((ops_z_i, scan_z_i))
   }
 }
@@ -248,21 +233,14 @@ where
     F: &impl StepCircuit<E1::Scalar>,
     step_size: StepSize,
   ) -> Result<NebulaPublicParams<E1, E2, S1, S2, M>, NovaError> {
-    let F_pp = PublicParams::setup(
-      F,
-      &TrivialCircuit::default(),
-      &*default_ck_hint::<E1>(),
-      &*default_ck_hint::<E2>(),
-    )?;
+    let F_pp = PublicParams::setup(F, &*default_ck_hint::<E1>(), &*default_ck_hint::<E2>())?;
     let ops_pp = PublicParams::setup(
       &BatchedOpsCircuit::empty::<M>(step_size.execution),
-      &TrivialCircuit::default(),
       &*default_ck_hint::<E1>(),
       &*default_ck_hint::<E2>(),
     )?;
     let scan_pp = PublicParams::setup(
       &ScanCircuit::empty(step_size.memory),
-      &TrivialCircuit::default(),
       &*default_ck_hint::<E1>(),
       &*default_ck_hint::<E2>(),
     )?;
@@ -363,31 +341,17 @@ where
     let (ops_z_i, scan_z_i) = match self {
       Self::Recursive(rs) => {
         // verify F
-        rs.F.verify(
-          pp.F(),
-          rs.F.num_steps(),
-          &U.F_z_0,
-          &[<E2 as Engine>::Scalar::ZERO],
-          U.F_ic,
-        )?;
+        rs.F.verify(pp.F(), rs.F.num_steps(), &U.F_z_0, U.F_ic)?;
 
         // verify F_ops
-        let (ops_z_i, _) = rs.ops.verify(
-          pp.ops(),
-          rs.ops.num_steps(),
-          &U.ops_z_0,
-          &[<E2 as Engine>::Scalar::ZERO],
-          U.ops_ic,
-        )?;
+        let ops_z_i = rs
+          .ops
+          .verify(pp.ops(), rs.ops.num_steps(), &U.ops_z_0, U.ops_ic)?;
 
         // verify F_scan
-        let (scan_z_i, _) = rs.scan.verify(
-          pp.scan(),
-          rs.scan.num_steps(),
-          &U.scan_z_0,
-          &[<E2 as Engine>::Scalar::ZERO],
-          U.scan_ic,
-        )?;
+        let scan_z_i = rs
+          .scan
+          .verify(pp.scan(), rs.scan.num_steps(), &U.scan_z_0, U.scan_ic)?;
 
         (ops_z_i, scan_z_i)
       }
@@ -511,20 +475,13 @@ where
     NovaError,
   > {
     let circuits = self.circuits()?;
-    let secondary_circuit = TrivialCircuit::default();
     let z_0 = self.z0();
     let first = circuits.first().ok_or(NovaError::NoCircuit)?;
-    let mut rs = RecursiveSNARK::new(
-      pp,
-      first,
-      &secondary_circuit,
-      &z_0,
-      &[<E2 as Engine>::Scalar::ZERO],
-    )?;
+    let mut rs = RecursiveSNARK::new(pp, first, &z_0)?;
     let mut ic = IncrementalCommitment::<E1>::default();
     for (i, circuit) in circuits.iter().enumerate() {
       tracing::debug!("Proving step {}/{}", i + 1, circuits.len());
-      rs.prove_step(pp, circuit, &secondary_circuit, ic)?;
+      rs.prove_step(pp, circuit, ic)?;
       let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
         &pp.ck_primary,

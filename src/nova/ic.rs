@@ -63,5 +63,5 @@ where
   let mut ro = E1::RO::new(ro_consts.clone());
   ro.absorb(scalar_as_base::<E1>(prev_ic));
   comm_advice.absorb_in_ro(&mut ro);
-  ro.squeeze(NUM_HASH_BITS)
+  scalar_as_base::<E2>(ro.squeeze(NUM_HASH_BITS))
 }
