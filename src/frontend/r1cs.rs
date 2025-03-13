@@ -6,7 +6,10 @@ use super::{shape_cs::ShapeCS, solver::SatisfyingAssignment, test_shape_cs::Test
 use crate::{
   errors::NovaError,
   frontend::{Index, LinearCombination},
-  r1cs::{CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, SparseMatrix},
+  r1cs::{
+    split::{SplitR1CSInstance, SplitR1CSWitness},
+    CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, SparseMatrix,
+  },
   traits::Engine,
   CommitmentKey,
 };
@@ -20,6 +23,13 @@ pub trait NovaWitness<E: Engine> {
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError>;
+
+  /// Return an instance and witness, given a shape and ck.
+  fn split_r1cs_instance_and_witness(
+    &self,
+    shape: &R1CSShape<E>,
+    ck: &CommitmentKey<E>,
+  ) -> Result<(SplitR1CSInstance<E>, SplitR1CSWitness<E>), NovaError>;
 }
 
 /// `NovaShape` provides methods for acquiring `R1CSShape` and `CommitmentKey` from implementers.
@@ -39,10 +49,32 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
     let W = R1CSWitness::<E>::new(shape, self.aux_assignment())?;
     let X = &self.input_assignment()[1..];
 
-    let comm_W = W.commit(ck);
+    let comm_W = W.commit(
+      ck,
+      (
+        self.precommitted_assignment()[0].len(),
+        self.precommitted_assignment()[1].len(),
+      ),
+    );
 
     let instance = R1CSInstance::<E>::new(shape, &comm_W, X)?;
 
+    Ok((instance, W))
+  }
+
+  fn split_r1cs_instance_and_witness(
+    &self,
+    S: &R1CSShape<E>,
+    ck: &CommitmentKey<E>,
+  ) -> Result<(SplitR1CSInstance<E>, SplitR1CSWitness<E>), NovaError> {
+    let (aux_U, aux_W) = self.r1cs_instance_and_witness(S, ck)?;
+    let pre_committed_witness = (
+      self.precommitted_assignment()[0].to_vec(),
+      self.precommitted_assignment()[1].to_vec(),
+    );
+    let W = SplitR1CSWitness::new(aux_W, pre_committed_witness);
+    let pre_commits = W.commit(ck);
+    let instance = SplitR1CSInstance::new(aux_U, pre_commits);
     Ok((instance, W))
   }
 }
@@ -62,25 +94,37 @@ macro_rules! impl_nova_shape {
         let mut X = (&mut A, &mut B, &mut C, &mut num_cons_added);
         let num_inputs = self.num_inputs();
         let num_constraints = self.num_constraints();
-        let num_vars = self.num_aux();
+        let num_aux = self.num_aux();
+        let num_precommitted = self.num_precommitted();
 
         for constraint in self.constraints.iter() {
           add_constraint(
             &mut X,
-            num_vars,
+            num_aux,
+            num_precommitted,
             &constraint.0,
             &constraint.1,
             &constraint.2,
           );
         }
         assert_eq!(num_cons_added, num_constraints);
-
-        A.cols = num_vars + num_inputs;
-        B.cols = num_vars + num_inputs;
-        C.cols = num_vars + num_inputs;
+        let total_num_vars = num_aux + num_precommitted.0 + num_precommitted.1;
+        let num_cols = total_num_vars + num_inputs;
+        A.cols = num_cols;
+        B.cols = num_cols;
+        C.cols = num_cols;
 
         // Don't count One as an input for shape's purposes.
-        let S = R1CSShape::new(num_constraints, num_vars, num_inputs - 1, A, B, C).unwrap();
+        let S = R1CSShape::new(
+          num_constraints,
+          total_num_vars,
+          num_inputs - 1,
+          num_precommitted,
+          A,
+          B,
+          C,
+        )
+        .unwrap();
         let ck = S.commitment_key(ck_hint);
 
         (S, ck)
@@ -100,6 +144,7 @@ fn add_constraint<S: PrimeField>(
     &mut usize,
   ),
   num_vars: usize,
+  num_precommitted: (usize, usize),
   a_lc: &LinearCombination<S>,
   b_lc: &LinearCombination<S>,
   c_lc: &LinearCombination<S>,
@@ -117,11 +162,22 @@ fn add_constraint<S: PrimeField>(
         Index::Input(idx) => {
           // Inputs come last, with input 0, representing 'one',
           // at position num_vars within the witness vector.
-          let idx = idx + num_vars;
+          let idx = idx + num_vars + num_precommitted.0 + num_precommitted.1;
           M.data.push(*coeff);
           M.indices.push(idx);
         }
         Index::Aux(idx) => {
+          let idx = idx + num_precommitted.0 + num_precommitted.1;
+          M.data.push(*coeff);
+          M.indices.push(idx);
+        }
+        Index::Precommitted(idx, split) => {
+          let idx = idx
+            + if split.is_first() {
+              0
+            } else {
+              num_precommitted.0
+            };
           M.data.push(*coeff);
           M.indices.push(idx);
         }

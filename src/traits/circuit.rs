@@ -18,6 +18,11 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
     cs: &mut CS,
     z: &[AllocatedNum<F>],
   ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>;
+
+  /// Get non-deterministic advice for the circuit
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    (vec![], vec![])
+  }
 }
 
 /// A trivial step circuit that simply returns the input

@@ -13,6 +13,8 @@ use crate::{
 use core::fmt::Write;
 use ff::{Field, PrimeField};
 
+use super::constraint_system::Split;
+
 #[derive(Clone, Copy)]
 struct OrderedVariable(Variable);
 
@@ -46,6 +48,9 @@ impl Ord for OrderedVariable {
       }
       (Index::Input(_), Index::Aux(_)) => Ordering::Less,
       (Index::Aux(_), Index::Input(_)) => Ordering::Greater,
+      (Index::Input(_), _) | (Index::Aux(_), _) => Ordering::Less,
+      (_, Index::Input(_)) | (_, Index::Aux(_)) => Ordering::Greater,
+      (_, _) => Ordering::Equal,
     }
   }
 }
@@ -116,6 +121,11 @@ where
     self.aux.len()
   }
 
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> (usize, usize) {
+    (0, 0)
+  }
+
   /// Print all public inputs, aux inputs, and constraint names.
   #[allow(dead_code)]
   pub fn pretty_print_list(&self) -> Vec<String> {
@@ -178,6 +188,9 @@ where
           }
           Index::Aux(i) => {
             write!(s, "`A{}`", &self.aux[i]).unwrap();
+          }
+          Index::Precommitted(_, _) => {
+            unimplemented!()
           }
         }
       }
@@ -258,6 +271,20 @@ where
     self.inputs.push(path);
 
     Ok(Variable::new_unchecked(Index::Input(self.inputs.len() - 1)))
+  }
+
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _: A,
+    _: F,
+    _: Split,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    unimplemented!()
   }
 
   fn enforce<A, AR, LA, LB, LC>(&mut self, annotation: A, a: LA, b: LB, c: LC)

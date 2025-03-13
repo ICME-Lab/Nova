@@ -4,7 +4,12 @@ use crate::{
   constants::NUM_CHALLENGE_BITS,
   errors::NovaError,
   gadgets::utils::{base_as_scalar, scalar_as_base},
-  r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  r1cs::{
+    split::{
+      SplitR1CSInstance, SplitR1CSWitness, SplitRelaxedR1CSInstance, SplitRelaxedR1CSWitness,
+    },
+    R1CSShape,
+  },
   traits::{AbsorbInROTrait, Engine, ROConstants, ROTrait},
   Commitment, CommitmentKey,
 };
@@ -38,11 +43,17 @@ impl<E: Engine> NIFS<E> {
     ro_consts: &ROConstants<E>,
     pp_digest: &E::Scalar,
     S: &R1CSShape<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &R1CSInstance<E>,
-    W2: &R1CSWitness<E>,
-  ) -> Result<(NIFS<E>, (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>)), NovaError> {
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitR1CSInstance<E>,
+    W2: &SplitR1CSWitness<E>,
+  ) -> Result<
+    (
+      NIFS<E>,
+      (SplitRelaxedR1CSInstance<E>, SplitRelaxedR1CSWitness<E>),
+    ),
+    NovaError,
+  > {
     // initialize a new RO
     let mut ro = E::RO::new(ro_consts.clone());
 
@@ -81,9 +92,9 @@ impl<E: Engine> NIFS<E> {
     &self,
     ro_consts: &ROConstants<E>,
     pp_digest: &E::Scalar,
-    U1: &RelaxedR1CSInstance<E>,
-    U2: &R1CSInstance<E>,
-  ) -> Result<RelaxedR1CSInstance<E>, NovaError> {
+    U1: &SplitRelaxedR1CSInstance<E>,
+    U2: &SplitR1CSInstance<E>,
+  ) -> Result<SplitRelaxedR1CSInstance<E>, NovaError> {
     // initialize a new RO
     let mut ro = E::RO::new(ro_consts.clone());
 
@@ -122,14 +133,14 @@ impl<E: Engine> NIFSRelaxed<E> {
     ro_consts: &ROConstants<E>,
     vk: &E::Scalar,
     S: &R1CSShape<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &RelaxedR1CSInstance<E>,
-    W2: &RelaxedR1CSWitness<E>,
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+    W2: &SplitRelaxedR1CSWitness<E>,
   ) -> Result<
     (
       NIFSRelaxed<E>,
-      (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
+      (SplitRelaxedR1CSInstance<E>, SplitRelaxedR1CSWitness<E>),
     ),
     NovaError,
   > {
@@ -172,9 +183,9 @@ impl<E: Engine> NIFSRelaxed<E> {
     &self,
     ro_consts: &ROConstants<E>,
     pp_digest: &E::Scalar,
-    U1: &RelaxedR1CSInstance<E>,
-    U2: &RelaxedR1CSInstance<E>,
-  ) -> Result<RelaxedR1CSInstance<E>, NovaError> {
+    U1: &SplitRelaxedR1CSInstance<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+  ) -> Result<SplitRelaxedR1CSInstance<E>, NovaError> {
     // initialize a new RO
     let mut ro = E::RO::new(ro_consts.clone());
 
@@ -215,6 +226,10 @@ mod tests {
     },
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::SparseMatrix,
+    r1cs::{
+      R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness, SparseMatrix, R1CS,
+    },
+    traits::{commitment::CommitmentEngineTrait, snark::default_ck_hint, Engine},
     traits::{commitment::CommitmentEngineTrait, snark::default_ck_hint, Engine, ROConstants},
   };
   use ff::{Field, PrimeField};
@@ -263,18 +278,18 @@ mod tests {
     // Now get the instance and assignment for one instance
     let mut cs = SatisfyingAssignment::<E>::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(E::Scalar::from(5)));
-    let (U1, W1) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
+    let (U1, W1) = cs.split_r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that the first instance is satisfiable
-    assert!(shape.is_sat(&ck, &U1, &W1).is_ok());
+    assert!(shape.is_sat_split(&ck, &U1, &W1).is_ok());
 
     // Now get the instance and assignment for second instance
     let mut cs = SatisfyingAssignment::<E>::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(E::Scalar::from(135)));
-    let (U2, W2) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
+    let (U2, W2) = cs.split_r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that the second instance is satisfiable
-    assert!(shape.is_sat(&ck, &U2, &W2).is_ok());
+    assert!(shape.is_sat_split(&ck, &U2, &W2).is_ok());
 
     // execute a sequence of folds
     execute_sequence(
@@ -301,14 +316,14 @@ mod tests {
     ro_consts: &ROConstants<E>,
     pp_digest: &<E as Engine>::Scalar,
     shape: &R1CSShape<E>,
-    U1: &R1CSInstance<E>,
-    W1: &R1CSWitness<E>,
-    U2: &R1CSInstance<E>,
-    W2: &R1CSWitness<E>,
+    U1: &SplitR1CSInstance<E>,
+    W1: &SplitR1CSWitness<E>,
+    U2: &SplitR1CSInstance<E>,
+    W2: &SplitR1CSWitness<E>,
   ) {
     // produce a default running instance
-    let mut running_W = RelaxedR1CSWitness::default(shape);
-    let mut running_U = RelaxedR1CSInstance::default(ck, shape);
+    let mut running_W = SplitRelaxedR1CSWitness::default(shape);
+    let mut running_U = SplitRelaxedR1CSInstance::default(ck, shape);
 
     // produce a step SNARK with (W1, U1) as the first incoming witness-instance pair
     let res = NIFS::prove(
@@ -347,7 +362,9 @@ mod tests {
     running_U = U;
 
     // check if the running instance is satisfiable
-    assert!(shape.is_sat_relaxed(ck, &running_U, &running_W).is_ok());
+    assert!(shape
+      .is_sat_relaxed_split(ck, &running_U, &running_W)
+      .is_ok());
   }
 
   fn execute_sequence_relaxed<E: Engine>(
@@ -355,14 +372,14 @@ mod tests {
     ro_consts: &ROConstants<E>,
     pp_digest: &<E as Engine>::Scalar,
     shape: &R1CSShape<E>,
-    U1: &RelaxedR1CSInstance<E>,
-    W1: &RelaxedR1CSWitness<E>,
-    U2: &RelaxedR1CSInstance<E>,
-    W2: &RelaxedR1CSWitness<E>,
-  ) -> (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>) {
+    U1: &SplitRelaxedR1CSInstance<E>,
+    W1: &SplitRelaxedR1CSWitness<E>,
+    U2: &SplitRelaxedR1CSInstance<E>,
+    W2: &SplitRelaxedR1CSWitness<E>,
+  ) -> (SplitRelaxedR1CSInstance<E>, SplitRelaxedR1CSWitness<E>) {
     // produce a default running instance
-    let mut running_W = RelaxedR1CSWitness::default(shape);
-    let mut running_U = RelaxedR1CSInstance::default(ck, shape);
+    let mut running_W = SplitRelaxedR1CSWitness::default(shape);
+    let mut running_U = SplitRelaxedR1CSInstance::default(ck, shape);
 
     // produce a step SNARK with (W1, U1) as the first incoming witness-instance pair
     let res = NIFSRelaxed::prove(
@@ -401,21 +418,23 @@ mod tests {
     running_U = U;
 
     // check if the running instance is satisfiable
-    assert!(shape.is_sat_relaxed(ck, &running_U, &running_W).is_ok());
+    assert!(shape
+      .is_sat_relaxed_split(ck, &running_U, &running_W)
+      .is_ok());
 
     (running_U, running_W)
   }
 
   fn test_tiny_r1cs_relaxed_derandomize_with<E: Engine>() {
     let (ck, S, final_U, final_W) = test_tiny_r1cs_relaxed_with::<E>();
-    assert!(S.is_sat_relaxed(&ck, &final_U, &final_W).is_ok());
+    assert!(S.is_sat_relaxed_split(&ck, &final_U, &final_W).is_ok());
 
     let dk = E::CE::derand_key(&ck);
     let (derandom_final_W, final_blind_W, final_blind_E) = final_W.derandomize();
     let derandom_final_U = final_U.derandomize(&dk, &final_blind_W, &final_blind_E);
 
     assert!(S
-      .is_sat_relaxed(&ck, &derandom_final_U, &derandom_final_W)
+      .is_sat_relaxed_split(&ck, &derandom_final_U, &derandom_final_W)
       .is_ok());
   }
 
@@ -429,8 +448,8 @@ mod tests {
   fn test_tiny_r1cs_relaxed_with<E: Engine>() -> (
     CommitmentKey<E>,
     R1CSShape<E>,
-    RelaxedR1CSInstance<E>,
-    RelaxedR1CSWitness<E>,
+    SplitRelaxedR1CSInstance<E>,
+    SplitRelaxedR1CSWitness<E>,
   ) {
     let one = <E::Scalar as Field>::ONE;
     let (num_cons, num_vars, num_io, A, B, C) = {
@@ -491,6 +510,7 @@ mod tests {
         num_cons,
         num_vars,
         num_inputs - 1,
+        (0, 0),
         SparseMatrix::new(&A, rows, cols),
         SparseMatrix::new(&B, rows, cols),
         SparseMatrix::new(&C, rows, cols),
@@ -526,7 +546,7 @@ mod tests {
           res.unwrap()
         };
         let U = {
-          let comm_W = W.commit(ck);
+          let comm_W = W.commit(ck, (0, 0));
           let res = R1CSInstance::new(&S, &comm_W, &X);
           assert!(res.is_ok());
           res.unwrap()
@@ -545,14 +565,23 @@ mod tests {
 
     println!("INSTANCE {:#?}", U1.clone());
 
+    let U1 = SplitRelaxedR1CSInstance::new(
+      RelaxedR1CSInstance::from_r1cs_instance(&ck, &S, &U1),
+      (Commitment::<E>::default(), Commitment::<E>::default()),
+    );
+    let W1 = SplitRelaxedR1CSWitness::new(
+      RelaxedR1CSWitness::from_r1cs_witness(&S, &W1),
+      (vec![], vec![]),
+    );
+
     // execute a sequence of folds
     let (final_U, final_W) = execute_sequence_relaxed(
       &ck,
       &ro_consts,
       &<E as Engine>::Scalar::ZERO,
       &S,
-      &RelaxedR1CSInstance::from_r1cs_instance(&ck, &S, &U1),
-      &RelaxedR1CSWitness::from_r1cs_witness(&S, &W1),
+      &U1,
+      &W1,
       &U2,
       &W2,
     );
@@ -627,6 +656,7 @@ mod tests {
         num_cons,
         num_vars,
         num_inputs - 1,
+        (0, 0),
         SparseMatrix::new(&A, rows, cols),
         SparseMatrix::new(&B, rows, cols),
         SparseMatrix::new(&C, rows, cols),
@@ -662,7 +692,7 @@ mod tests {
           res.unwrap()
         };
         let U = {
-          let comm_W = W.commit(ck);
+          let comm_W = W.commit(ck, (0, 0));
           let res = R1CSInstance::new(&S, &comm_W, &X);
           assert!(res.is_ok());
           res.unwrap()
@@ -679,6 +709,10 @@ mod tests {
     let (O, U1, W1) = rand_inst_witness_generator(&ck, &I);
     let (_O, U2, W2) = rand_inst_witness_generator(&ck, &O);
 
+    let U1 = SplitR1CSInstance::new(U1, (Commitment::<E>::default(), Commitment::<E>::default()));
+    let U2 = SplitR1CSInstance::new(U2, (Commitment::<E>::default(), Commitment::<E>::default()));
+    let W1 = SplitR1CSWitness::new(W1, (vec![], vec![]));
+    let W2 = SplitR1CSWitness::new(W2, (vec![], vec![]));
     // execute a sequence of folds
     execute_sequence(
       &ck,

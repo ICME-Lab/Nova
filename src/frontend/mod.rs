@@ -7,7 +7,7 @@ pub mod gadgets;
 mod constraint_system;
 mod lc;
 
-pub use constraint_system::{Circuit, ConstraintSystem, Namespace, SynthesisError};
+pub use constraint_system::{Circuit, ConstraintSystem, Namespace, Split, SynthesisError};
 pub use gadgets::{
   boolean::{AllocatedBit, Boolean},
   num,
@@ -23,7 +23,6 @@ pub mod solver;
 pub mod test_shape_cs;
 pub mod util_cs;
 
-#[cfg(test)]
 pub use util_cs::test_cs;
 
 #[cfg(test)]

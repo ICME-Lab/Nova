@@ -54,8 +54,11 @@ pub enum NovaError {
   #[error("InternalTranscriptError")]
   InternalTranscriptError,
   /// returned when the multiset check fails
-  #[error("InvalidMultisetProof")]
-  InvalidMultisetProof,
+  #[error("InvalidMultisetProof {reason}")]
+  InvalidMultisetProof {
+    /// The reason for multiset proof failure
+    reason: String,
+  },
   /// returned when the product proof check fails
   #[error("InvalidProductProof")]
   InvalidProductProof,
@@ -74,6 +77,15 @@ pub enum NovaError {
   /// returned when the prover cannot prove the provided statement due to completeness error
   #[error("InternalError")]
   InternalError,
+  /// returned when there is an invalid incremental commitment
+  #[error("InvalidIC")]
+  InvalidIC,
+  /// returned when circuit for proving is not found
+  #[error("NoCircuit")]
+  NoCircuit,
+  /// returned when non-recursive SNARK is provided
+  #[error("NotRecursive")]
+  NotRecursive,
 }
 
 impl From<SynthesisError> for NovaError {

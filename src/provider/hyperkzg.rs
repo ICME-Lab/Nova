@@ -28,7 +28,9 @@ use core::{
   slice,
 };
 use ff::{Field, PrimeFieldBits};
-use rand_core::OsRng;
+use rand_chacha::ChaCha8Rng;
+use rand_core::SeedableRng;
+
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -454,18 +456,23 @@ where
 
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey {
     // NOTE: this is for testing purposes and should not be used in production
-    Self::CommitmentKey::setup_from_rng(label, n, OsRng)
+    Self::CommitmentKey::setup_from_rng(label, n, ChaCha8Rng::from_seed([0u8; 32]))
   }
 
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey {
     Self::DerandKey { h: ck.h }
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
+  fn commit_at(
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+    idx: usize,
+  ) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
 
     Commitment {
-      comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()])
+      comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[idx..idx + v.len()])
         + <E::GE as DlogGroup>::group(&ck.h) * r,
     }
   }
@@ -954,6 +961,7 @@ mod tests {
   };
   use bincode::Options;
   use rand::SeedableRng;
+  use rand_core::OsRng;
 
   type E = Bn256EngineKZG;
   type Fr = <E as Engine>::Scalar;
