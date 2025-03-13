@@ -19,7 +19,7 @@ use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 
 mod sparse;
 pub(crate) use sparse::SparseMatrix;
@@ -431,7 +431,9 @@ impl<E: Engine> R1CSShape<E> {
       .map(|(((az, bz), cz), e)| *az * *bz - u * *cz - *e)
       .collect::<Vec<E::Scalar>>();
 
+    let time = Instant::now();
     let comm_T = CE::<E>::commit(ck, &T, r_T);
+    println!("Commitment time: {:?}", time.elapsed());
 
     Ok((T, comm_T))
   }
