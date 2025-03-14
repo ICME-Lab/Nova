@@ -460,7 +460,7 @@ mod tests {
     }
   }
 
-  #[test_log::test]
+  #[test]
   fn test_direct_snark_deleg() {
     let num_steps = 16;
 
