@@ -97,6 +97,14 @@ impl<Scalar: PrimeField> MultilinearPolynomial<Scalar> {
     )
     .sum()
   }
+
+  pub fn split(&self, idx: usize) -> (Self, Self) {
+    assert!(idx < self.len());
+    (
+      Self::new(self.Z[..idx].to_vec()),
+      Self::new(self.Z[idx..2 * idx].to_vec()),
+    )
+  }
 }
 
 impl<Scalar: PrimeField> Index<usize> for MultilinearPolynomial<Scalar> {
