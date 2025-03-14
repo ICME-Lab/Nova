@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 mod circuit;
 pub mod ic;
 pub mod nebula;
-mod nifs;
+pub(crate) mod nifs;
 
 use circuit::{NovaAugmentedCircuit, NovaAugmentedCircuitInputs};
 use nifs::{NIFSRelaxed, NIFS};
