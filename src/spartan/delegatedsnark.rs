@@ -4,35 +4,30 @@
 //! polynomial commitment scheme in which the verifier's costs is succinct.
 //! This code includes experimental optimizations to reduce runtimes and proof sizes.
 //! We have not yet proven the security of these optimizations, so this code is subject to significant changes in the future.
+
+//! Choices done: two different transcripts are used: one for prover and one for delegated party:
+//! the function in which the transcripts are defined could be thought again, for now it's at highest level
+//! See L240
 use crate::{
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness, SparseMatrix},
   spartan::{
-    math::Math,
     polys::{
       eq::EqPolynomial,
-      identity::IdentityPolynomial,
-      masked_eq::MaskedEqPolynomial,
       multilinear::{MultilinearPolynomial, SparsePolynomial},
-      univariate::{CompressedUniPoly, UniPoly},
     },
-    powers,
-    spark::{CompCommitmentEngineTrait, SparkEngine},
-    sumcheck::{SumcheckEngine, SumcheckProof},
-    PolyEvalInstance, PolyEvalWitness,
+    spark::CompCommitmentEngineTrait,
+    sumcheck::SumcheckProof,
   },
   traits::{
-    commitment::{CommitmentEngineTrait, Len},
     evaluation::EvaluationEngineTrait,
     snark::{DigestHelperTrait, RelaxedR1CSSNARKTrait},
-    Engine, TranscriptEngineTrait, TranscriptReprTrait,
+    Engine, TranscriptEngineTrait,
   },
-  zip_with, Commitment, CommitmentKey,
+  CommitmentKey,
 };
-use core::cmp::max;
 use ff::Field;
-use itertools::Itertools as _;
 use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -163,6 +158,218 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
     U: &RelaxedR1CSInstance<E>,
     W: &RelaxedR1CSWitness<E>,
   ) -> Result<Self, NovaError> {
+    let (prover_step, r) = <Self as Delegatable<E>>::prover_step(ck, pk, _S, U, W)?;
+
+    let r: (&[E::Scalar], &[E::Scalar]) = (r.0.as_slice(), r.1.as_slice());
+    let delegated_step = <Self as Delegatable<E>>::delegated_step(ck, pk, _S, r)?;
+
+    let proof = <Self as Delegatable<E>>::combine_proofs(prover_step, delegated_step);
+
+    Ok(proof)
+  }
+
+  /// verifies a proof of satisfiability of a RelaxedR1CS instance
+  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError> {
+    let mut transcript = E::TE::new(b"RelaxedR1CSSNARK");
+
+    // append the commitment to R1CS matrices and the RelaxedR1CSInstance to the transcript
+    transcript.absorb(b"C", &vk.comm);
+    transcript.absorb(b"U", U);
+
+    let (num_rounds_x, num_rounds_y) = (
+      (vk.num_cons as f64).log2() as usize,
+      ((vk.num_vars as f64).log2() as usize + 1),
+    );
+
+    // outer sum-check
+    let tau = (0..num_rounds_x)
+      .map(|_i| transcript.squeeze(b"t"))
+      .collect::<Result<Vec<E::Scalar>, NovaError>>()?;
+
+    let (claim_outer_final, r_x) =
+      self
+        .sc_proof_outer
+        .verify(E::Scalar::ZERO, num_rounds_x, 3, &mut transcript)?;
+
+    // verify claim_outer_final
+    let (claim_Az, claim_Bz, claim_Cz) = self.claims_outer;
+    let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
+    let claim_outer_final_expected =
+      taus_bound_rx * (claim_Az * claim_Bz - U.u * claim_Cz - self.eval_E);
+    if claim_outer_final != claim_outer_final_expected {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    transcript.absorb(
+      b"claims_outer",
+      &[
+        self.claims_outer.0,
+        self.claims_outer.1,
+        self.claims_outer.2,
+        self.eval_E,
+      ]
+      .as_slice(),
+    );
+
+    // inner sum-check
+    let r = transcript.squeeze(b"r")?;
+    let claim_inner_joint =
+      self.claims_outer.0 + r * self.claims_outer.1 + r * r * self.claims_outer.2;
+
+    let (claim_inner_final, r_y) =
+      self
+        .sc_proof_inner
+        .verify(claim_inner_joint, num_rounds_y, 2, &mut transcript)?;
+
+    // verify claim_inner_final
+    let eval_Z = {
+      let eval_X = {
+        // constant term
+        let mut poly_X = vec![U.u];
+        //remaining inputs
+        poly_X.extend((0..U.X.len()).map(|i| U.X[i]).collect::<Vec<E::Scalar>>());
+        SparsePolynomial::new((vk.num_vars as f64).log2() as usize, poly_X).evaluate(&r_y[1..])
+      };
+      (E::Scalar::ONE - r_y[0]) * self.eval_W + r_y[0] * eval_X
+    };
+
+    // verify evaluation argument to retrieve evaluations of R1CS matrices
+
+    // CHANGED TO USE A DIFFERENT TRANSCRIPT
+    // this second transcript is fed with r_x and r_y
+    let mut transcript_Delegated = E::TE::new(b"RelaxedR1CSSNARK_Delegated");
+    transcript_Delegated.absorb(b"r_x", &r_x.as_slice());
+    transcript_Delegated.absorb(b"r_y", &r_y.as_slice());
+    let (eval_A, eval_B, eval_C) = CC::verify(
+      &vk.vk_ee,
+      &vk.comm,
+      &(&r_x, &r_y),
+      &self.eval_arg_cc,
+      &mut transcript_Delegated,
+    )?;
+
+    let claim_inner_final_expected = (eval_A + r * eval_B + r * r * eval_C) * eval_Z;
+    if claim_inner_final != claim_inner_final_expected {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    // batch sum-check
+    transcript.absorb(b"eval_W", &self.eval_W);
+
+    let rho = transcript.squeeze(b"rho")?;
+    let claim_batch_joint = self.eval_E + rho * self.eval_W;
+    let num_rounds_z = num_rounds_x;
+    let (claim_batch_final, r_z) =
+      self
+        .sc_proof_batch
+        .verify(claim_batch_joint, num_rounds_z, 2, &mut transcript)?;
+
+    let claim_batch_final_expected = {
+      let poly_rz = EqPolynomial::new(r_z.clone());
+      let rz_rx = poly_rz.evaluate(&r_x);
+      let rz_ry = poly_rz.evaluate(&r_y[1..]);
+      rz_rx * self.eval_E_prime + rho * rz_ry * self.eval_W_prime
+    };
+
+    if claim_batch_final != claim_batch_final_expected {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    transcript.absorb(
+      b"claims_batch",
+      &[self.eval_E_prime, self.eval_W_prime].as_slice(),
+    );
+
+    // we now combine evaluation claims at the same point rz into one
+    let gamma = transcript.squeeze(b"gamma")?;
+    let comm = U.comm_E + U.comm_W * gamma;
+    let eval = self.eval_E_prime + gamma * self.eval_W_prime;
+
+    // verify eval_W and eval_E
+    EE::verify(
+      &vk.vk_ee,
+      &mut transcript,
+      &comm,
+      &r_z,
+      &eval,
+      &self.eval_arg,
+    )?;
+
+    Ok(())
+  }
+}
+
+/// A trait that represents a delegatable SNARK
+pub trait Delegatable<E: Engine>: RelaxedR1CSSNARKTrait<E> {
+  /// The prover's proof part
+  type ProverProofPart;
+  /// The delegated party's proof part
+  type DelegatedProofPart;
+
+  /// Computes the prover's proof part
+  fn prover_step(
+    ck: &CommitmentKey<E>,
+    pk: &<Self as RelaxedR1CSSNARKTrait<E>>::ProverKey,
+    _S: &R1CSShape<E>,
+    U: &RelaxedR1CSInstance<E>,
+    W: &RelaxedR1CSWitness<E>,
+  ) -> Result<(Self::ProverProofPart, (Vec<E::Scalar>, Vec<E::Scalar>)), NovaError>;
+
+  /// Computes the delegated party's proof part
+  fn delegated_step(
+    ck: &CommitmentKey<E>,
+    pk: &<Self as RelaxedR1CSSNARKTrait<E>>::ProverKey,
+    _S: &R1CSShape<E>,
+    r: (&[E::Scalar], &[E::Scalar]),
+  ) -> Result<Self::DelegatedProofPart, NovaError>;
+
+  /// Combines the prover's and delegated party's proof parts
+  fn combine_proofs(
+    prover_proof: Self::ProverProofPart,
+    delegated_proof: Self::DelegatedProofPart,
+  ) -> Self;
+}
+
+/// A type that represents the witness related part of the proof
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct RelaxedR1CSProver<E: Engine, EE: EvaluationEngineTrait<E>> {
+  sc_proof_outer: SumcheckProof<E>,
+  claims_outer: (E::Scalar, E::Scalar, E::Scalar),
+  eval_E: E::Scalar,
+  sc_proof_inner: SumcheckProof<E>,
+  eval_W: E::Scalar,
+  sc_proof_batch: SumcheckProof<E>,
+  eval_E_prime: E::Scalar,
+  eval_W_prime: E::Scalar,
+  eval_arg: EE::EvaluationArgument,
+}
+
+/// A type that represents the non-witness related part of the proof
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct RelaxedR1CSDelegated<
+  E: Engine,
+  EE: EvaluationEngineTrait<E>,
+  CC: CompCommitmentEngineTrait<E, EE>,
+> {
+  eval_arg_cc: CC::EvaluationArgument,
+}
+
+impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>> Delegatable<E>
+  for RelaxedR1CSSNARK<E, EE, CC>
+{
+  type ProverProofPart = RelaxedR1CSProver<E, EE>;
+  type DelegatedProofPart = RelaxedR1CSDelegated<E, EE, CC>;
+
+  /// Computes the witness related part of the proof, executed by the prover
+  fn prover_step(
+    ck: &CommitmentKey<E>,
+    pk: &<Self as RelaxedR1CSSNARKTrait<E>>::ProverKey,
+    _S: &R1CSShape<E>,
+    U: &RelaxedR1CSInstance<E>,
+    W: &RelaxedR1CSWitness<E>,
+  ) -> Result<(RelaxedR1CSProver<E, EE>, (Vec<E::Scalar>, Vec<E::Scalar>)), NovaError> {
     let W = W.pad(&pk.S); // pad the witness
     let mut transcript = E::TE::new(b"RelaxedR1CSSNARK");
 
@@ -300,22 +507,6 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
       &mut transcript,
     )?;
 
-    use std::time::Instant;
-
-    let start = Instant::now();
-    // we now prove evaluations of R1CS matrices at (r_x, r_y)
-    let eval_arg_cc = CC::prove(
-      ck,
-      &pk.pk_ee,
-      &pk.S,
-      &pk.decomm,
-      &pk.comm,
-      &(&r_x, &r_y),
-      &mut transcript,
-    )?;
-
-    println!("CC::prove: (delegated part) took {:?}", start.elapsed());
-
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
     transcript.absorb(b"eval_W", &eval_W);
 
@@ -363,141 +554,59 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
 
     let eval_arg = EE::prove(ck, &pk.pk_ee, &mut transcript, &comm, &poly, &r_z, &eval)?;
 
-    Ok(RelaxedR1CSSNARK {
-      sc_proof_outer,
-      claims_outer: (claim_Az, claim_Bz, claim_Cz),
-      eval_E,
-      sc_proof_inner,
-      eval_W,
-      sc_proof_batch,
-      eval_E_prime,
-      eval_W_prime,
-      eval_arg,
-      eval_arg_cc,
-    })
+    Ok((
+      Self::ProverProofPart {
+        sc_proof_outer,
+        claims_outer: (claim_Az, claim_Bz, claim_Cz),
+        eval_E,
+        sc_proof_inner,
+        eval_W,
+        sc_proof_batch,
+        eval_E_prime,
+        eval_W_prime,
+        eval_arg,
+      },
+      (r_x, r_y),
+    ))
   }
 
-  /// verifies a proof of satisfiability of a RelaxedR1CS instance
-  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError> {
-    let mut transcript = E::TE::new(b"RelaxedR1CSSNARK");
-
-    // append the commitment to R1CS matrices and the RelaxedR1CSInstance to the transcript
-    transcript.absorb(b"C", &vk.comm);
-    transcript.absorb(b"U", U);
-
-    let (num_rounds_x, num_rounds_y) = (
-      (vk.num_cons as f64).log2() as usize,
-      ((vk.num_vars as f64).log2() as usize + 1),
-    );
-
-    // outer sum-check
-    let tau = (0..num_rounds_x)
-      .map(|_i| transcript.squeeze(b"t"))
-      .collect::<Result<Vec<E::Scalar>, NovaError>>()?;
-
-    let (claim_outer_final, r_x) =
-      self
-        .sc_proof_outer
-        .verify(E::Scalar::ZERO, num_rounds_x, 3, &mut transcript)?;
-
-    // verify claim_outer_final
-    let (claim_Az, claim_Bz, claim_Cz) = self.claims_outer;
-    let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
-    let claim_outer_final_expected =
-      taus_bound_rx * (claim_Az * claim_Bz - U.u * claim_Cz - self.eval_E);
-    if claim_outer_final != claim_outer_final_expected {
-      return Err(NovaError::InvalidSumcheckProof);
-    }
-
-    transcript.absorb(
-      b"claims_outer",
-      &[
-        self.claims_outer.0,
-        self.claims_outer.1,
-        self.claims_outer.2,
-        self.eval_E,
-      ]
-      .as_slice(),
-    );
-
-    // inner sum-check
-    let r = transcript.squeeze(b"r")?;
-    let claim_inner_joint =
-      self.claims_outer.0 + r * self.claims_outer.1 + r * r * self.claims_outer.2;
-
-    let (claim_inner_final, r_y) =
-      self
-        .sc_proof_inner
-        .verify(claim_inner_joint, num_rounds_y, 2, &mut transcript)?;
-
-    // verify claim_inner_final
-    let eval_Z = {
-      let eval_X = {
-        // constant term
-        let mut poly_X = vec![U.u];
-        //remaining inputs
-        poly_X.extend((0..U.X.len()).map(|i| U.X[i]).collect::<Vec<E::Scalar>>());
-        SparsePolynomial::new((vk.num_vars as f64).log2() as usize, poly_X).evaluate(&r_y[1..])
-      };
-      (E::Scalar::ONE - r_y[0]) * self.eval_W + r_y[0] * eval_X
-    };
-
-    // verify evaluation argument to retrieve evaluations of R1CS matrices
-    let (eval_A, eval_B, eval_C) = CC::verify(
-      &vk.vk_ee,
-      &vk.comm,
-      &(&r_x, &r_y),
-      &self.eval_arg_cc,
+  /// Computes the non-witness related part of the proof, executed by a delegated party
+  fn delegated_step(
+    ck: &CommitmentKey<E>,
+    pk: &<Self as RelaxedR1CSSNARKTrait<E>>::ProverKey,
+    _S: &R1CSShape<E>,
+    r: (&[E::Scalar], &[E::Scalar]),
+  ) -> Result<Self::DelegatedProofPart, NovaError> {
+    let mut transcript = E::TE::new(b"RelaxedR1CSSNARK_Delegated");
+    transcript.absorb(b"r_x", &r.0);
+    transcript.absorb(b"r_y", &r.1);
+    let eval_arg_cc = CC::prove(
+      ck,
+      &pk.pk_ee,
+      &pk.S,
+      &pk.decomm,
+      &pk.comm,
+      &r,
       &mut transcript,
     )?;
+    Ok(Self::DelegatedProofPart { eval_arg_cc })
+  }
 
-    let claim_inner_final_expected = (eval_A + r * eval_B + r * r * eval_C) * eval_Z;
-    if claim_inner_final != claim_inner_final_expected {
-      return Err(NovaError::InvalidSumcheckProof);
+  fn combine_proofs(
+    prover_proof: Self::ProverProofPart,
+    delegated_proof: Self::DelegatedProofPart,
+  ) -> Self {
+    RelaxedR1CSSNARK {
+      sc_proof_outer: prover_proof.sc_proof_outer,
+      claims_outer: prover_proof.claims_outer,
+      eval_E: prover_proof.eval_E,
+      sc_proof_inner: prover_proof.sc_proof_inner,
+      eval_W: prover_proof.eval_W,
+      sc_proof_batch: prover_proof.sc_proof_batch,
+      eval_E_prime: prover_proof.eval_E_prime,
+      eval_W_prime: prover_proof.eval_W_prime,
+      eval_arg: prover_proof.eval_arg,
+      eval_arg_cc: delegated_proof.eval_arg_cc,
     }
-
-    // batch sum-check
-    transcript.absorb(b"eval_W", &self.eval_W);
-
-    let rho = transcript.squeeze(b"rho")?;
-    let claim_batch_joint = self.eval_E + rho * self.eval_W;
-    let num_rounds_z = num_rounds_x;
-    let (claim_batch_final, r_z) =
-      self
-        .sc_proof_batch
-        .verify(claim_batch_joint, num_rounds_z, 2, &mut transcript)?;
-
-    let claim_batch_final_expected = {
-      let poly_rz = EqPolynomial::new(r_z.clone());
-      let rz_rx = poly_rz.evaluate(&r_x);
-      let rz_ry = poly_rz.evaluate(&r_y[1..]);
-      rz_rx * self.eval_E_prime + rho * rz_ry * self.eval_W_prime
-    };
-
-    if claim_batch_final != claim_batch_final_expected {
-      return Err(NovaError::InvalidSumcheckProof);
-    }
-
-    transcript.absorb(
-      b"claims_batch",
-      &[self.eval_E_prime, self.eval_W_prime].as_slice(),
-    );
-
-    // we now combine evaluation claims at the same point rz into one
-    let gamma = transcript.squeeze(b"gamma")?;
-    let comm = U.comm_E + U.comm_W * gamma;
-    let eval = self.eval_E_prime + gamma * self.eval_W_prime;
-
-    // verify eval_W and eval_E
-    EE::verify(
-      &vk.vk_ee,
-      &mut transcript,
-      &comm,
-      &r_z,
-      &eval,
-      &self.eval_arg,
-    )?;
-
-    Ok(())
   }
 }

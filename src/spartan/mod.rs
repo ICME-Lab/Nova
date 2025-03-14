@@ -7,6 +7,7 @@
 //! In polynomial.rs we also provide foundational types and functions for manipulating multilinear polynomials.
 pub mod delegatedsnark;
 pub mod direct;
+pub mod direct_deleg;
 pub mod ppsnark;
 pub mod snark;
 pub mod spark;
