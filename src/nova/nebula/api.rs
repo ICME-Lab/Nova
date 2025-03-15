@@ -494,6 +494,7 @@ where
   }
 
   /// Run the engine
+  #[tracing::instrument(skip_all, name = "RecursiveSNARKEngine::run")]
   fn run(
     constructor: impl FnOnce() -> Self,
     pp: &PublicParams<E1, E2>,
