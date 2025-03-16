@@ -21,6 +21,7 @@ use num_integer::Integer;
 use num_traits::ToPrimitive;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::ops::Sub;
 
 const KEY_FILE_HEAD: [u8; 12] = *b"PEDERSEN_KEY";
 
@@ -178,6 +179,19 @@ where
   fn add(self, other: Commitment<E>) -> Commitment<E> {
     Commitment {
       comm: self.comm + other.comm,
+    }
+  }
+}
+
+impl<E: Engine> Sub for Commitment<E>
+where
+  E::GE: DlogGroup,
+{
+  type Output = Commitment<E>;
+
+  fn sub(self, other: Commitment<E>) -> Commitment<E> {
+    Commitment {
+      comm: self.comm - other.comm,
     }
   }
 }

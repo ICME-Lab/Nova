@@ -12,6 +12,7 @@ use num_integer::Integer;
 use num_traits::ToPrimitive;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
+use std::ops::Sub;
 
 /// A helper trait for types implementing scalar multiplication.
 pub trait ScalarMul<Rhs, Output = Self>: Mul<Rhs, Output = Output> + MulAssign<Rhs> {}
@@ -35,6 +36,7 @@ pub trait CommitmentTrait<E: Engine>:
   + AbsorbInROTrait<E>
   + AbsorbInRO2Trait<E>
   + Add<Self, Output = Self>
+  + Sub<Self, Output = Self>
   + ScalarMul<E::Scalar>
 {
   /// Returns the coordinate representation of the commitment

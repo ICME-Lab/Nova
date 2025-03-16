@@ -32,6 +32,7 @@ use num_integer::Integer;
 use num_traits::ToPrimitive;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
+use std::ops::Sub;
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -263,6 +264,19 @@ where
   fn add(self, other: Commitment<E>) -> Commitment<E> {
     Commitment {
       comm: self.comm + other.comm,
+    }
+  }
+}
+
+impl<E: Engine> Sub for Commitment<E>
+where
+  E::GE: PairingGroup,
+{
+  type Output = Commitment<E>;
+
+  fn sub(self, other: Commitment<E>) -> Commitment<E> {
+    Commitment {
+      comm: self.comm - other.comm,
     }
   }
 }

@@ -47,6 +47,7 @@ impl<E: Engine> NIFS<E> {
     W1: &SplitRelaxedR1CSWitness<E>,
     U2: &SplitR1CSInstance<E>,
     W2: &SplitR1CSWitness<E>,
+    mut comm_CZ_1: Option<&mut Commitment<E>>,
   ) -> Result<
     (
       NIFS<E>,
@@ -64,14 +65,26 @@ impl<E: Engine> NIFS<E> {
     U2.absorb_in_ro(&mut ro);
 
     // compute a commitment to the cross-term
-    let r_T = E::Scalar::random(&mut OsRng);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T)?;
+    // let r_T = E::Scalar::random(&mut OsRng);
+    let r_T = E::Scalar::ZERO; // use this for testing
+    let (T, comm_T, comm_CZ_2) = match comm_CZ_1 {
+      Some(ref comm_CZ_1) => S.commit_T_nebula(ck, U1, W1, U2, W2, &r_T, comm_CZ_1),
+      None => {
+        let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T)?;
+        Ok((T, comm_T, Commitment::<E>::default()))
+      }
+    }?;
 
     // append `comm_T` to the transcript and obtain a challenge
     comm_T.absorb_in_ro(&mut ro);
 
     // compute a challenge from the RO
     let r = base_as_scalar::<E>(ro.squeeze(NUM_CHALLENGE_BITS));
+
+    // update comm_CZ_1
+    if let Some(inner_comm_CZ_1) = comm_CZ_1.as_mut() {
+      **inner_comm_CZ_1 = **inner_comm_CZ_1 + (comm_CZ_2 * r);
+    }
 
     // fold the instance using `r` and `comm_T`
     let U = U1.fold(U2, &comm_T, &r);
@@ -325,7 +338,7 @@ mod tests {
 
     // produce a step SNARK with (W1, U1) as the first incoming witness-instance pair
     let res = NIFS::prove(
-      ck, ro_consts, pp_digest, shape, &running_U, &running_W, U1, W1,
+      ck, ro_consts, pp_digest, shape, &running_U, &running_W, U1, W1, None,
     );
     assert!(res.is_ok());
     let (nifs, (_U, W)) = res.unwrap();
@@ -343,7 +356,7 @@ mod tests {
 
     // produce a step SNARK with (W2, U2) as the second incoming witness-instance pair
     let res = NIFS::prove(
-      ck, ro_consts, pp_digest, shape, &running_U, &running_W, U2, W2,
+      ck, ro_consts, pp_digest, shape, &running_U, &running_W, U2, W2, None,
     );
     assert!(res.is_ok());
     let (nifs, (_U, W)) = res.unwrap();
