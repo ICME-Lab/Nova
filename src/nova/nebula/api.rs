@@ -1,6 +1,8 @@
 //! This module defines the Nebula API. A CC-IVC scheme that proves the correct execution of a program
 //! and that the program maintained memory correctly.
 
+use std::time::Instant;
+
 use super::product_circuits::{
   convert_advice_separate, BatchedOpsCircuit, OpsCircuit, ScanCircuit,
 };
@@ -266,8 +268,10 @@ where
     // --- Run the F (transition) circuit ---
     //
     // We use commitment-carrying IVC to prove the repeated execution of F
-    tracing::debug!("Execution proving");
+    tracing::info!("Execution proving");
+    let time = Instant::now();
     let (F_rs, F_ic, F_z_0) = RecursiveSNARKEngine::run(|| F_engine, pp.F())?;
+    tracing::info!("Execution proving took {:?}", time.elapsed());
 
     // --- Get challenges gamma and alpha ---
     //
