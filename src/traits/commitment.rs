@@ -126,4 +126,7 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
     commit: &Self::Commitment,
     r: &E::Scalar,
   ) -> Self::Commitment;
+
+  /// Commit to sparse vector
+  fn commit_sparse(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
 }

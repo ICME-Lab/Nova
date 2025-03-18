@@ -478,11 +478,11 @@ impl<E: Engine> R1CSShape<E> {
       .collect::<Vec<E::Scalar>>();
 
     let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
-      || CE::<E>::commit(ck, &AZ_1_circ_BZ_2, r_T),
+      || CE::<E>::commit_sparse(ck, &AZ_1_circ_BZ_2, r_T),
       || {
         rayon::join(
-          || CE::<E>::commit(ck, &AZ_2_circ_BZ_1, r_T),
-          || CE::<E>::commit(ck, &CZ_2, r_T),
+          || CE::<E>::commit_sparse(ck, &AZ_2_circ_BZ_1, r_T),
+          || CE::<E>::commit_sparse(ck, &CZ_2, r_T),
         )
       },
     );
