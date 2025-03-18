@@ -591,6 +591,7 @@ where
       "sparsity: {:?}",
       (nonzero_indices.len() as f64 / v.len() as f64) * 100.0
     );
+    println!("nonzero_indices.len(): {:?}", nonzero_indices.len());
 
     // If there are no nonzero values, simply return r * h.
     let sub_commitment = if nonzero_indices.is_empty() {
