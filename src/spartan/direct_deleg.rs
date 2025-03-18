@@ -496,7 +496,7 @@ mod tests {
     let res = DirectSNARK::prove(&pk, circuit.clone(), &z_i);
     assert!(res.is_ok());
     println!(
-      "Time elapsed for proving with {} is: {:?}\n",
+      "Time elapsed for proving with {} is: {:?}",
       proof_type,
       start.elapsed()
     );
@@ -504,6 +504,14 @@ mod tests {
     let z_i_plus_one = circuit.output(&z_i);
 
     let snark = res.unwrap();
+
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    bincode::serialize_into(&mut encoder, &snark).unwrap();
+    let compressed_snark_encoded = encoder.finish().unwrap();
+    println!(
+      "Compressed snark len {:?} bytes\n",
+      compressed_snark_encoded.len()
+    );
 
     // verify the SNARK
     let io = z_i
@@ -547,6 +555,14 @@ mod tests {
       start.elapsed()
     );
 
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    bincode::serialize_into(&mut encoder, &prover_step).unwrap();
+    let compressed_prover_step_encoded = encoder.finish().unwrap();
+    println!(
+      "Compressed prover step len {:?} bytes",
+      compressed_prover_step_encoded.len()
+    );
+
     let r = (r.0.as_slice(), r.1.as_slice());
     let start = Instant::now();
     let delegated_step = DirectSNARK::<E, S, AndCircuit<E>>::delegated_step(&pk, r).unwrap();
@@ -554,6 +570,14 @@ mod tests {
       "Time elapsed for delegated part of proving with {} is: {:?}",
       proof_type,
       start.elapsed()
+    );
+
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    bincode::serialize_into(&mut encoder, &delegated_step).unwrap();
+    let compressed_delegated_step_encoded = encoder.finish().unwrap();
+    println!(
+      "Compressed delegated step len {:?} bytes",
+      compressed_delegated_step_encoded.len()
     );
 
     println!(

@@ -300,11 +300,13 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
 }
 
 /// A trait that represents a delegatable SNARK
-pub trait Delegatable<E: Engine>: RelaxedR1CSSNARKTrait<E> {
+pub trait Delegatable<E: Engine>:
+  RelaxedR1CSSNARKTrait<E> + Serialize + for<'de> Deserialize<'de>
+{
   /// The prover's proof part
-  type ProverProofPart;
+  type ProverProofPart: Serialize + for<'de> Deserialize<'de>;
   /// The delegated party's proof part
-  type DelegatedProofPart;
+  type DelegatedProofPart: Serialize + for<'de> Deserialize<'de>;
 
   /// Computes the prover's proof part
   fn prover_step(
