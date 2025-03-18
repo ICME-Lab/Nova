@@ -579,11 +579,12 @@ where
 
   fn commit_sparse(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
     // Collect indices of all nonzero elements.
-    let nonzero_indices: Vec<usize> = v
-      .iter()
-      .enumerate()
-      .filter_map(|(i, s)| if s.is_zero().into() { None } else { Some(i) })
-      .collect();
+    let mut nonzero_indices = Vec::new();
+    for (i, scalar) in v.iter().enumerate() {
+      if scalar.is_zero().unwrap_u8() != 1 {
+        nonzero_indices.push(i);
+      }
+    }
 
     // If there are no nonzero values, simply return r * h.
     let sub_commitment = if nonzero_indices.is_empty() {
