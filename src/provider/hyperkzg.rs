@@ -577,11 +577,11 @@ where
   }
 
   fn commit_sparse(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
-    // Collect tuples of (dense slice of scalars, corresponding slice of bases)
+    // --- Collect tuples of (dense slice of scalars, corresponding slice of bases) ---
     let mut slices = Vec::new();
     let mut i = 0;
     while i < v.len() {
-      // Skip zeros (assumes E::Scalar implements an is_zero method)
+      // Skip zeros.
       if v[i].is_zero().into() {
         i += 1;
         continue;
@@ -598,16 +598,12 @@ where
     // Process each dense slice in parallel:
     // For each tuple, perform the multi-scalar multiplication on the slice and corresponding bases.
     let sub_commitment = slices
-        .par_iter()
-        .map(|(v_slice, base_slice)| E::GE::vartime_multiscalar_mul(v_slice, base_slice))
-        // Use the identity element as the neutral value. (This assumes that the DlogGroup trait provides an identity.)
-        .reduce(<E::GE as DlogGroup>::zero, |a, b| a + b);
-
-    // Compute the randomness component: r * h.
-    let h_commit = <E::GE as DlogGroup>::group(&ck.h) * r;
+      .par_iter()
+      .map(|(v_slice, base_slice)| E::GE::vartime_multiscalar_mul(v_slice, base_slice))
+      .reduce(<E::GE as DlogGroup>::zero, |a, b| a + b);
 
     Commitment {
-      comm: sub_commitment + h_commit,
+      comm: sub_commitment + <E::GE as DlogGroup>::group(&ck.h) * r,
     }
   }
 }
