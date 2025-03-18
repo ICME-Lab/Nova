@@ -577,25 +577,32 @@ where
     })
   }
 
+  #[tracing::instrument(skip_all, name = "commit_sparse", level = "debug")]
   fn commit_sparse(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
     // Collect indices of all nonzero elements.
     let mut nonzero_indices = Vec::new();
-    for (i, scalar) in v.iter().enumerate() {
-      if scalar.is_zero().unwrap_u8() != 1 {
-        nonzero_indices.push(i);
+    tracing::trace_span!("filtering").in_scope(|| {
+      for (i, scalar) in v.iter().enumerate() {
+        if scalar.is_zero().unwrap_u8() != 1 {
+          nonzero_indices.push(i);
+        }
       }
-    }
+    });
 
     // If there are no nonzero values, simply return r * h.
     let sub_commitment = if nonzero_indices.is_empty() {
       <E::GE as DlogGroup>::zero()
     } else {
       // Gather references to nonzero scalars and corresponding bases.
-      let scalars: Vec<E::Scalar> = nonzero_indices.iter().map(|&i| v[i]).collect();
-      let bases = nonzero_indices.iter().map(|&i| ck.ck[i]).collect_vec();
+      let (scalars, bases) = tracing::trace_span!("gathering").in_scope(|| {
+        let scalars: Vec<E::Scalar> = nonzero_indices.iter().map(|&i| v[i]).collect();
+        let bases = nonzero_indices.iter().map(|&i| ck.ck[i]).collect_vec();
+        (scalars, bases)
+      });
 
       // Single multi-scalar multiplication over all nonzero entries.
-      E::GE::vartime_multiscalar_mul(&scalars, &bases)
+      tracing::trace_span!("multiscalar_mul")
+        .in_scope(|| E::GE::vartime_multiscalar_mul(&scalars, &bases))
     };
 
     // Compute the randomness component and add it.
