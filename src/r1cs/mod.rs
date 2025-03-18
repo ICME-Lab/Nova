@@ -478,15 +478,22 @@ impl<E: Engine> R1CSShape<E> {
       .collect::<Vec<E::Scalar>>();
 
     let time = Instant::now();
-    let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
-      || CE::<E>::commit_sparse(ck, &AZ_1_circ_BZ_2, r_T),
-      || {
-        rayon::join(
-          || CE::<E>::commit_sparse(ck, &AZ_2_circ_BZ_1, r_T),
-          || CE::<E>::commit_sparse(ck, &CZ_2, r_T),
-        )
-      },
-    );
+    // let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
+    //   || CE::<E>::commit_sparse(ck, &AZ_1_circ_BZ_2, r_T),
+    //   || {
+    //     rayon::join(
+    //       || CE::<E>::commit_sparse(ck, &AZ_2_circ_BZ_1, r_T),
+    //       || CE::<E>::commit_sparse(ck, &CZ_2, r_T),
+    //     )
+    //   },
+    // );
+    let (comm_AZ_1_circ_BZ_2, comm_AZ_2_circ_BZ_1, comm_CZ_2) = {
+      (
+        CE::<E>::commit_sparse(ck, &AZ_1_circ_BZ_2, r_T),
+        CE::<E>::commit_sparse(ck, &AZ_2_circ_BZ_1, r_T),
+        CE::<E>::commit_sparse(ck, &CZ_2, r_T),
+      )
+    };
     tracing::debug!("commit_T_nebula: {:?}", time.elapsed());
 
     let comm_T = comm_AZ_1_circ_BZ_2 + comm_AZ_2_circ_BZ_1 - ((comm_CZ_2 * U1.u()) + *comm_CZ_1);
