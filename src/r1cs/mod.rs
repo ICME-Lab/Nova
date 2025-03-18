@@ -19,7 +19,7 @@ use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 
 mod sparse;
 pub(crate) use sparse::SparseMatrix;
@@ -477,6 +477,7 @@ impl<E: Engine> R1CSShape<E> {
       .map(|(((az, bz), cz_2), cz_1)| *az + *bz - *cz_2 * u - *cz_1)
       .collect::<Vec<E::Scalar>>();
 
+    let time = Instant::now();
     let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
       || CE::<E>::commit_sparse(ck, &AZ_1_circ_BZ_2, r_T),
       || {
@@ -486,6 +487,8 @@ impl<E: Engine> R1CSShape<E> {
         )
       },
     );
+    tracing::debug!("commit_T_nebula: {:?}", time.elapsed());
+
     let comm_T = comm_AZ_1_circ_BZ_2 + comm_AZ_2_circ_BZ_1 - ((comm_CZ_2 * U1.u()) + *comm_CZ_1);
     Ok((T, comm_T, comm_CZ_2))
   }

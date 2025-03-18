@@ -577,7 +577,6 @@ where
     })
   }
 
-  #[tracing::instrument(skip_all, name = "commit_sparse", level = "debug")]
   fn commit_sparse(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
     // Collect indices of all nonzero elements.
     let mut nonzero_indices = Vec::new();
@@ -588,6 +587,10 @@ where
         }
       }
     });
+    tracing::debug!(
+      "sparsity: {:?}",
+      (nonzero_indices.len() as f64 / v.len() as f64) * 100.0
+    );
 
     // If there are no nonzero values, simply return r * h.
     let sub_commitment = if nonzero_indices.is_empty() {
@@ -599,7 +602,6 @@ where
         let bases = nonzero_indices.iter().map(|&i| ck.ck[i]).collect_vec();
         (scalars, bases)
       });
-
       // Single multi-scalar multiplication over all nonzero entries.
       tracing::trace_span!("multiscalar_mul")
         .in_scope(|| E::GE::vartime_multiscalar_mul(&scalars, &bases))
