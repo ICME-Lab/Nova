@@ -28,6 +28,7 @@ use core::{
   slice,
 };
 use ff::{Field, PrimeFieldBits};
+use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::ToPrimitive;
 use rand_chacha::ChaCha8Rng;
@@ -577,33 +578,29 @@ where
   }
 
   fn commit_sparse(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
-    // --- Collect tuples of (dense slice of scalars, corresponding slice of bases) ---
-    let mut slices = Vec::new();
-    let mut i = 0;
-    while i < v.len() {
-      // Skip zeros.
-      if v[i].is_zero().into() {
-        i += 1;
-        continue;
-      }
-      // Mark the start of a dense slice of non-zero values.
-      let start = i;
-      while i < v.len() && v[i].is_zero().unwrap_u8() != 1 {
-        i += 1;
-      }
-      // [start, i) is a contiguous block of non-zeros.
-      slices.push((&v[start..i], &ck.ck[start..i]));
-    }
+    // Collect indices of all nonzero elements.
+    let nonzero_indices: Vec<usize> = v
+      .iter()
+      .enumerate()
+      .filter_map(|(i, s)| if s.is_zero().into() { None } else { Some(i) })
+      .collect();
 
-    // Process each dense slice in parallel:
-    // For each tuple, perform the multi-scalar multiplication on the slice and corresponding bases.
-    let sub_commitment = slices
-      .par_iter()
-      .map(|(v_slice, base_slice)| E::GE::vartime_multiscalar_mul(v_slice, base_slice))
-      .reduce(<E::GE as DlogGroup>::zero, |a, b| a + b);
+    // If there are no nonzero values, simply return r * h.
+    let sub_commitment = if nonzero_indices.is_empty() {
+      <E::GE as DlogGroup>::zero()
+    } else {
+      // Gather references to nonzero scalars and corresponding bases.
+      let scalars: Vec<E::Scalar> = nonzero_indices.iter().map(|&i| v[i]).collect();
+      let bases = nonzero_indices.iter().map(|&i| ck.ck[i]).collect_vec();
 
+      // Single multi-scalar multiplication over all nonzero entries.
+      E::GE::vartime_multiscalar_mul(&scalars, &bases)
+    };
+
+    // Compute the randomness component and add it.
+    let h_commit = <E::GE as DlogGroup>::group(&ck.h) * r;
     Commitment {
-      comm: sub_commitment + <E::GE as DlogGroup>::group(&ck.h) * r,
+      comm: sub_commitment + h_commit,
     }
   }
 }
