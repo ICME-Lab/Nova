@@ -476,7 +476,6 @@ impl<E: Engine> R1CSShape<E> {
       .zip(CZ_1.par_iter())
       .map(|(((az, bz), cz_2), cz_1)| *az + *bz - *cz_2 * u - *cz_1)
       .collect::<Vec<E::Scalar>>();
-    println!("T.len(): {}", T.len());
 
     let time = Instant::now();
     // let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
