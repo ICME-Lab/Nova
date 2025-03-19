@@ -268,10 +268,7 @@ where
     // --- Run the F (transition) circuit ---
     //
     // We use commitment-carrying IVC to prove the repeated execution of F
-    tracing::info!("Execution proving");
-    let time = Instant::now();
     let (F_rs, F_ic, F_z_0) = RecursiveSNARKEngine::run(|| F_engine, pp.F())?;
-    tracing::info!("Execution proving took {:?}", time.elapsed());
 
     // --- Get challenges gamma and alpha ---
     //

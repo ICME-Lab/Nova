@@ -398,6 +398,7 @@ impl<E: Engine> R1CSShape<E> {
     Ok(())
   }
 
+  #[tracing::instrument(skip_all, name = "commit_T", level = "debug")]
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
   pub fn commit_T(
@@ -436,6 +437,7 @@ impl<E: Engine> R1CSShape<E> {
     Ok((T, comm_T))
   }
 
+  #[tracing::instrument(skip_all, name = "commit_T_nebula")]
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
   pub fn commit_T_nebula(
