@@ -587,7 +587,7 @@ where
         }
       }
     });
-    tracing::debug!(
+    tracing::trace!(
       "sparsity: {:?}",
       (nonzero_indices.len() as f64 / v.len() as f64) * 100.0
     );

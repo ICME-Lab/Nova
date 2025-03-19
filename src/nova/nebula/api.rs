@@ -1,8 +1,5 @@
 //! This module defines the Nebula API. A CC-IVC scheme that proves the correct execution of a program
 //! and that the program maintained memory correctly.
-
-use std::time::Instant;
-
 use super::product_circuits::{
   convert_advice_separate, BatchedOpsCircuit, OpsCircuit, ScanCircuit,
 };
@@ -481,7 +478,7 @@ where
     let mut rs = RecursiveSNARK::new(pp, first, &z_0)?;
     let mut ic = IncrementalCommitment::<E1>::default();
     for (i, circuit) in circuits.iter().enumerate() {
-      tracing::debug!("Proving step {}/{}", i + 1, circuits.len());
+      tracing::info!("Proving step {}/{}", i + 1, circuits.len());
       rs.prove_step(pp, circuit, ic)?;
       let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E1, E2>(
