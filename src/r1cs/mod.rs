@@ -432,7 +432,7 @@ impl<E: Engine> R1CSShape<E> {
       .map(|(((az, bz), cz), e)| *az * *bz - u * *cz - *e)
       .collect::<Vec<E::Scalar>>();
 
-    let comm_T = CE::<E>::commit(ck, &T, r_T);
+    let comm_T = tracing::debug_span!("CE::<E>::commit").in_scope(|| CE::<E>::commit(ck, &T, r_T));
 
     Ok((T, comm_T))
   }

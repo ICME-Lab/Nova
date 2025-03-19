@@ -422,8 +422,8 @@ where
       &self.r_W_primary,
       &l_u_primary,
       &l_w_primary,
-      // Some(&mut self.comm_CZ_1),
-      None,
+      Some(&mut self.comm_CZ_1),
+      // None,
     )?;
     self.prev_comm_advice = l_u_primary.precommitted;
     let r_next_secondary = E2::Scalar::random(&mut OsRng);

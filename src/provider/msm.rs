@@ -2,7 +2,7 @@
 //! The generic implementation is adapted from halo2; we add an optimization to commit to bits more efficiently
 //! The specialized implementations are adapted from jolt, with additional optimizations and parallelization.
 use ff::{Field, PrimeField};
-use halo2curves::{group::Group, msm::msm_best, CurveAffine};
+use halo2curves::{group::Group, CurveAffine};
 use num_integer::Integer;
 use num_traits::{ToPrimitive, Zero};
 use rayon::{current_num_threads, prelude::*};
@@ -111,20 +111,19 @@ fn cpu_msm_serial<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve
 /// This will use multithreading if beneficial.
 /// Adapted from zcash/halo2
 pub fn msm<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
-  // assert_eq!(coeffs.len(), bases.len());
+  assert_eq!(coeffs.len(), bases.len());
 
-  // let num_threads = current_num_threads();
-  // if coeffs.len() > num_threads {
-  //   let chunk = coeffs.len() / num_threads;
-  //   coeffs
-  //     .par_chunks(chunk)
-  //     .zip(bases.par_chunks(chunk))
-  //     .map(|(coeffs, bases)| cpu_msm_serial(coeffs, bases))
-  //     .reduce(C::Curve::identity, |sum, evl| sum + evl)
-  // } else {
-  //   cpu_msm_serial(coeffs, bases)
-  // }
-  msm_best(coeffs, bases)
+  let num_threads = current_num_threads();
+  if coeffs.len() > num_threads {
+    let chunk = coeffs.len() / num_threads;
+    coeffs
+      .par_chunks(chunk)
+      .zip(bases.par_chunks(chunk))
+      .map(|(coeffs, bases)| cpu_msm_serial(coeffs, bases))
+      .reduce(C::Curve::identity, |sum, evl| sum + evl)
+  } else {
+    cpu_msm_serial(coeffs, bases)
+  }
 }
 
 fn num_bits(n: usize) -> usize {
