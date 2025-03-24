@@ -432,7 +432,8 @@ impl<E: Engine> R1CSShape<E> {
       .map(|(((az, bz), cz), e)| *az * *bz - u * *cz - *e)
       .collect::<Vec<E::Scalar>>();
 
-    let comm_T = tracing::debug_span!("CE::<E>::commit").in_scope(|| CE::<E>::commit(ck, &T, r_T));
+    let comm_T =
+      tracing::debug_span!("CE::<E>::commit").in_scope(|| CE::<E>::commit_sparse(ck, &T, r_T));
 
     Ok((T, comm_T))
   }
@@ -478,6 +479,41 @@ impl<E: Engine> R1CSShape<E> {
       .zip(CZ_1.par_iter())
       .map(|(((az, bz), cz_2), cz_1)| *az + *bz - *cz_2 * u - *cz_1)
       .collect::<Vec<E::Scalar>>();
+
+    // check sparsity of T
+    let non_zero_indices = T
+      .par_iter()
+      .enumerate()
+      .filter_map(|(i, t)| {
+        if t.is_zero().unwrap_u8() == 1 {
+          None
+        } else {
+          Some(i)
+        }
+      })
+      .collect::<Vec<usize>>();
+    tracing::info!(
+      "Sparsity of T: {}",
+      (non_zero_indices.len() as f64 / T.len() as f64) * 100.0
+    );
+
+    // check sparsity of W2
+    let non_zero_indices = W2
+      .clone_W()
+      .par_iter()
+      .enumerate()
+      .filter_map(|(i, w)| {
+        if w.is_zero().unwrap_u8() == 1 {
+          None
+        } else {
+          Some(i)
+        }
+      })
+      .collect::<Vec<usize>>();
+    tracing::info!(
+      "Sparsity of W2: {}",
+      (non_zero_indices.len() as f64 / W2.clone_W().len() as f64) * 100.0
+    );
 
     let (comm_T, comm_CZ_2) = tracing::debug_span!("Nebula CE::<E>::commit").in_scope(|| {
       let (comm_AZ_1_circ_BZ_2, comm_AZ_2_circ_BZ_1, comm_CZ_2) = (

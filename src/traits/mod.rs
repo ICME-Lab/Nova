@@ -19,7 +19,13 @@ pub trait Group: Clone + Copy + Debug + Send + Sync + Sized + Eq + PartialEq {
   type Base: PrimeFieldBits + Serialize + for<'de> Deserialize<'de>;
 
   /// A type representing an element of the scalar field of the group
-  type Scalar: PrimeFieldBits + PrimeFieldExt + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type Scalar: PrimeFieldBits
+    + PrimeFieldExt
+    + Send
+    + Sync
+    + Serialize
+    + for<'de> Deserialize<'de>
+    + Ord;
 
   /// Returns A, B, the order of the group, the size of the base field as big integers
   fn group_params() -> (Self::Base, Self::Base, BigInt, BigInt);
@@ -37,7 +43,8 @@ pub trait Engine: Clone + Copy + Debug + Send + Sync + Sized + Eq + PartialEq {
     + Sync
     + TranscriptReprTrait<Self::GE>
     + Serialize
-    + for<'de> Deserialize<'de>;
+    + for<'de> Deserialize<'de>
+    + Ord;
 
   /// A type that represents an element of the group
   type GE: Group<Base = Self::Base, Scalar = Self::Scalar> + Serialize + for<'de> Deserialize<'de>;
