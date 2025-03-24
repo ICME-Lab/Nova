@@ -196,7 +196,7 @@ impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>, C: StepCircuit<E::Scalar>> DirectSN
 
 impl<E: Engine, S: Delegatable<E>, C: StepCircuit<E::Scalar>> DirectSNARK<E, S, C> {
   /// Prepare instance and witness
-  fn setup_u_w(
+  pub fn setup_u_w(
     pk: &ProverKey<E, S>,
     sc: C,
     z_i: &[E::Scalar],
@@ -241,7 +241,7 @@ impl<E: Engine, S: Delegatable<E>, C: StepCircuit<E::Scalar>> DirectSNARK<E, S, 
   }
 
   /// Builds witness-related part of proof
-  fn prover_step(
+  pub fn prover_step(
     pk: &ProverKey<E, S>,
     u: &RelaxedR1CSInstance<E>,
     w: &RelaxedR1CSWitness<E>,
@@ -253,7 +253,7 @@ impl<E: Engine, S: Delegatable<E>, C: StepCircuit<E::Scalar>> DirectSNARK<E, S, 
   }
 
   /// Builds non-witness-related part of proof
-  fn delegated_step(
+  pub fn delegated_step(
     pk: &ProverKey<E, S>,
     r: (&[E::Scalar], &[E::Scalar]),
   ) -> Result<S::DelegatedProofPart, NovaError> {
@@ -486,6 +486,9 @@ mod tests {
 
     // produce keys
     let (pk, vk) = DirectSNARK::<E, S, AndCircuit<E>>::setup(circuit.clone()).unwrap();
+
+    let num_constraints = pk.S.num_cons;
+    println!("Number of constraints: {}", num_constraints);
 
     // setup inputs
     let z0 = vec![<E as Engine>::Scalar::ZERO];

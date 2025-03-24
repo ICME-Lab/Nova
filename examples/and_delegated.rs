@@ -22,10 +22,10 @@ type E2 = GrumpkinEngine;
 type EE1 = nova_snark::provider::hyperkzg::EvaluationEngine<E1>;
 type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<E2>;
 type S1 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E1, EE1, SparkEngine<E1, EE1>>; // non-preprocessing SNARK
-                                                                                                // type S2 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E2, EE2, SparkEngine<E2, EE2>>; // non-preprocessing SNARK
+type S2 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E2, EE2, SparkEngine<E2, EE2>>; // non-preprocessing SNARK
 
 // type S1 = nova_snark::spartan::ppsnark::RelaxedR1CSSNARK<E1, EE1>; // preprocessing SNARK
-type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // preprocessing SNARK
+// type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // preprocessing SNARK
 
 #[derive(Clone, Debug)]
 struct AndInstance<G: Group> {
@@ -207,112 +207,134 @@ fn main() {
   println!("Nova-based 64-bit bitwise AND example");
   println!("=========================================================");
 
-  let num_steps = 32;
-  for num_ops_per_step in [1024, 2048, 4096, 8192, 16384, 32768, 65536] {
-    // number of instances of AND per Nova's recursive step
-    let circuit = AndCircuit::new(num_ops_per_step);
+  let num_steps = 16;
+  let num_ops_per_step = 1;
+  // number of instances of AND per Nova's recursive step
 
-    println!(
-      "Proving {} AND ops ({num_ops_per_step} instances per step and {num_steps} steps)",
-      num_ops_per_step * num_steps
-    );
+  // Creates a dummy circuit for public params generation
+  let circuit = AndCircuit::new(num_ops_per_step);
 
-    // produce public parameters
-    let start = Instant::now();
-    println!("Producing public parameters...");
-    let pp = PublicParams::<E1, E2, AndCircuit<<E1 as Engine>::GE>>::setup(
-      &circuit,
-      &*S1::ck_floor(),
-      &*S2::ck_floor(),
-    )
-    .unwrap();
-    println!("PublicParams::setup, took {:?} ", start.elapsed());
+  println!(
+    "Proving {} AND ops ({num_ops_per_step} instances per step and {num_steps} steps)",
+    num_ops_per_step * num_steps
+  );
 
-    println!(
-      "Number of constraints per step (primary circuit): {}",
-      pp.num_constraints().0
-    );
-    println!(
-      "Number of constraints per step (secondary circuit): {}",
-      pp.num_constraints().1
-    );
+  // produce public parameters
+  let start = Instant::now();
+  println!("Producing public parameters...");
+  let pp = PublicParams::<E1, E2, AndCircuit<<E1 as Engine>::GE>>::setup(
+    &circuit,
+    &*S1::ck_floor(),
+    &*S2::ck_floor(),
+  )
+  .unwrap();
+  println!("PublicParams::setup, took {:?} ", start.elapsed());
 
-    println!(
-      "Number of variables per step (primary circuit): {}",
-      pp.num_variables().0
-    );
-    println!(
-      "Number of variables per step (secondary circuit): {}",
-      pp.num_variables().1
-    );
+  println!(
+    "Number of constraints per step (primary circuit): {}",
+    pp.num_constraints().0
+  );
+  println!(
+    "Number of constraints per step (secondary circuit): {}",
+    pp.num_constraints().1
+  );
 
-    // produce non-deterministic advice
-    let circuits = (0..num_steps)
-      .map(|_| AndCircuit::new(num_ops_per_step))
-      .collect::<Vec<_>>();
+  println!(
+    "Number of variables per step (primary circuit): {}",
+    pp.num_variables().0
+  );
+  println!(
+    "Number of variables per step (secondary circuit): {}",
+    pp.num_variables().1
+  );
 
-    type C = AndCircuit<<E1 as Engine>::GE>;
+  // produce non-deterministic advice
+  let circuits = (0..num_steps)
+    .map(|_| AndCircuit::new(num_ops_per_step))
+    .collect::<Vec<_>>();
 
-    // produce a recursive SNARK
-    println!("Generating a RecursiveSNARK...");
-    let mut recursive_snark: RecursiveSNARK<E1, E2, C> =
-      RecursiveSNARK::<E1, E2, C>::new(&pp, &circuits[0], &[<E1 as Engine>::Scalar::zero()])
-        .unwrap();
+  type C = AndCircuit<<E1 as Engine>::GE>;
 
-    let start = Instant::now();
-    for circuit in circuits.iter() {
-      let res = recursive_snark.prove_step(&pp, circuit);
-      assert!(res.is_ok());
-    }
-    println!(
-      "RecursiveSNARK::prove {} AND ops: took {:?} ",
-      num_ops_per_step * num_steps,
-      start.elapsed()
-    );
+  // produce a recursive SNARK
+  println!("\nGenerating a RecursiveSNARK...");
+  let mut recursive_snark: RecursiveSNARK<E1, E2, C> =
+    RecursiveSNARK::<E1, E2, C>::new(&pp, &circuits[0], &[<E1 as Engine>::Scalar::zero()]).unwrap();
 
-    // verify the recursive SNARK
-    println!("Verifying a RecursiveSNARK...");
-    let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO]);
-    println!("RecursiveSNARK::verify: {:?}", res.is_ok(),);
+  let start = Instant::now();
+  for circuit in circuits.iter() {
+    let res = recursive_snark.prove_step(&pp, circuit);
     assert!(res.is_ok());
-
-    // produce a compressed SNARK
-    println!("Generating a CompressedSNARK using Spartan with HyperKZG...");
-    let start = Instant::now();
-
-    let (pk, vk) = CompressedSNARK::<_, _, _, S1, S2>::setup(&pp).unwrap();
-
-    println!("CompressedSNARK::setup: took {:?}", start.elapsed());
-
-    let start = Instant::now();
-
-    let res = CompressedSNARK::<_, _, _, S1, S2>::prove(&pp, &pk, &recursive_snark);
-    println!(
-      "CompressedSNARK::prove: {:?}, took {:?}",
-      res.is_ok(),
-      start.elapsed()
-    );
-    assert!(res.is_ok());
-    let compressed_snark = res.unwrap();
-
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    bincode::serialize_into(&mut encoder, &compressed_snark).unwrap();
-    let compressed_snark_encoded = encoder.finish().unwrap();
-    println!(
-      "CompressedSNARK::len {:?} bytes",
-      compressed_snark_encoded.len()
-    );
-
-    // verify the compressed SNARK
-    println!("Verifying a CompressedSNARK...");
-    let start = Instant::now();
-    let res = compressed_snark.verify(&vk, num_steps, &[<E1 as Engine>::Scalar::ZERO]);
-    println!(
-      "CompressedSNARK::verify: {:?}, took {:?}",
-      res.is_ok(),
-      start.elapsed()
-    );
-    assert!(res.is_ok());
-    println!("=========================================================");
   }
+  println!(
+    "RecursiveSNARK::prove {} AND ops: took {:?} ",
+    num_ops_per_step * num_steps,
+    start.elapsed()
+  );
+
+  // verify the recursive SNARK
+  println!("\nVerifying a RecursiveSNARK...");
+  let res = recursive_snark.verify(&pp, num_steps, &[<E1 as Engine>::Scalar::ZERO]);
+  println!("RecursiveSNARK::verify: {:?}", res.is_ok(),);
+  assert!(res.is_ok());
+
+  // produce a compressed SNARK
+  println!("\nGenerating a CompressedSNARK using Spartan with HyperKZG...");
+  let start = Instant::now();
+
+  let (pk, vk) = CompressedSNARK::<_, _, _, S1, S2>::setup(&pp).unwrap();
+
+  println!("CompressedSNARK::setup: took {:?}", start.elapsed());
+
+  let start = Instant::now();
+
+  let res = CompressedSNARK::<_, _, _, S1, S2>::prover_step(&pp, &pk, &recursive_snark);
+  println!(
+    "CompressedSNARK::prover_step: {:?}, took {:?}",
+    res.is_ok(),
+    start.elapsed()
+  );
+  assert!(res.is_ok());
+  let (compressed_prover_part, r_primary, r_secondary) = res.unwrap();
+
+  let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+  bincode::serialize_into(&mut encoder, &compressed_prover_part).unwrap();
+  let compressed_prover_part_encoded = encoder.finish().unwrap();
+  println!(
+    "CompressedSNARK::prover_step {:?} bytes",
+    compressed_prover_part_encoded.len()
+  );
+
+  let start = Instant::now();
+  let res = CompressedSNARK::<_, _, _, S1, S2>::delegated_step(&pp, &pk, r_primary, r_secondary);
+  println!(
+    "CompressedSNARK::delegated_step: {:?}, took {:?}",
+    res.is_ok(),
+    start.elapsed()
+  );
+  assert!(res.is_ok());
+  let delegated_part = res.unwrap();
+
+  let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+  bincode::serialize_into(&mut encoder, &delegated_part).unwrap();
+  let delegated_part_encoded = encoder.finish().unwrap();
+  println!(
+    "CompressedSNARK::delegated_step {:?} bytes",
+    delegated_part_encoded.len()
+  );
+
+  let compressed_snark =
+    CompressedSNARK::<_, _, _, S1, S2>::combine_proofs(compressed_prover_part, delegated_part)
+      .unwrap();
+
+  // verify the compressed SNARK
+  println!("\nVerifying a CompressedSNARK...");
+  let start = Instant::now();
+  let res = compressed_snark.verify(&vk, num_steps, &[<E1 as Engine>::Scalar::ZERO]);
+  println!(
+    "CompressedSNARK::verify: {:?}, took {:?}",
+    res.is_ok(),
+    start.elapsed()
+  );
+  assert!(res.is_ok());
+  println!("=========================================================");
 }

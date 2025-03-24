@@ -304,9 +304,9 @@ pub trait Delegatable<E: Engine>:
   RelaxedR1CSSNARKTrait<E> + Serialize + for<'de> Deserialize<'de>
 {
   /// The prover's proof part
-  type ProverProofPart: Serialize + for<'de> Deserialize<'de>;
+  type ProverProofPart: Send + Serialize + for<'de> Deserialize<'de>;
   /// The delegated party's proof part
-  type DelegatedProofPart: Serialize + for<'de> Deserialize<'de>;
+  type DelegatedProofPart: Send + Serialize + for<'de> Deserialize<'de>;
 
   /// Computes the prover's proof part
   fn prover_step(
