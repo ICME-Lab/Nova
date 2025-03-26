@@ -21,11 +21,8 @@ type E1 = Bn256EngineKZG;
 type E2 = GrumpkinEngine;
 type EE1 = nova_snark::provider::hyperkzg::EvaluationEngine<E1>;
 type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<E2>;
-type S1 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E1, EE1, SparkEngine<E1, EE1>>; // non-preprocessing SNARK
-type S2 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E2, EE2, SparkEngine<E2, EE2>>; // non-preprocessing SNARK
-
-// type S1 = nova_snark::spartan::ppsnark::RelaxedR1CSSNARK<E1, EE1>; // preprocessing SNARK
-// type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // preprocessing SNARK
+type S1 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E1, EE1, SparkEngine<E1, EE1>>;
+type S2 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E2, EE2, SparkEngine<E2, EE2>>;
 
 #[derive(Clone, Debug)]
 struct AndInstance<G: Group> {
