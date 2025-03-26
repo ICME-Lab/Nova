@@ -1078,8 +1078,8 @@ where
         wit_blind_r_Wn_secondary,
         err_blind_r_Wn_secondary,
 
-        snark_primary: snark_primary,
-        snark_secondary: snark_secondary,
+        snark_primary,
+        snark_secondary,
 
         zn: recursive_snark.zi.clone(),
 
