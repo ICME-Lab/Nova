@@ -4,7 +4,7 @@ use crate::{
   gadgets::utils::to_bignat_repr,
   provider::{
     ptau::{read_points, write_points, PtauFileError},
-    traits::DlogGroup,
+    traits::{DlogGroup, DlogGroupExt},
   },
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentTrait, Len},
@@ -203,7 +203,7 @@ where
 
 impl<E: Engine> CommitmentEngineTrait<E> for CommitmentEngine<E>
 where
-  E::GE: DlogGroup,
+  E::GE: DlogGroupExt,
 {
   type CommitmentKey = CommitmentKey<E>;
   type Commitment = Commitment<E>;
@@ -258,6 +258,7 @@ where
 
   fn load_setup(
     reader: &mut (impl std::io::Read + std::io::Seek),
+    _label: &'static [u8],
     n: usize,
   ) -> Result<Self::CommitmentKey, PtauFileError> {
     let num = n.next_power_of_two();
@@ -307,10 +308,9 @@ where
     Self: Sized;
 }
 
-impl<E> CommitmentKeyExtTrait<E> for CommitmentKey<E>
+impl<E: Engine<CE = CommitmentEngine<E>>> CommitmentKeyExtTrait<E> for CommitmentKey<E>
 where
-  E: Engine<CE = CommitmentEngine<E>>,
-  E::GE: DlogGroup,
+  E::GE: DlogGroupExt,
 {
   fn split_at(&self, n: usize) -> (CommitmentKey<E>, CommitmentKey<E>) {
     (
@@ -395,13 +395,15 @@ mod tests {
   fn test_key_save_load() {
     let path = "/tmp/pedersen_test.keys";
 
-    let keys = CommitmentEngine::<E>::setup(b"test", 100);
+    const LABEL: &[u8; 4] = b"test";
+
+    let keys = CommitmentEngine::<E>::setup(LABEL, 100);
 
     keys
       .save_to(&mut BufWriter::new(File::create(path).unwrap()))
       .unwrap();
 
-    let keys_read = CommitmentEngine::load_setup(&mut File::open(path).unwrap(), 100);
+    let keys_read = CommitmentEngine::load_setup(&mut File::open(path).unwrap(), LABEL, 100);
 
     assert!(keys_read.is_ok());
     let keys_read: CommitmentKey<E> = keys_read.unwrap();
