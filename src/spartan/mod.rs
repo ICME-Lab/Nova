@@ -5,9 +5,12 @@
 //! We also provide direct.rs that allows proving a step circuit directly with either of the two SNARKs.
 //!
 //! In polynomial.rs we also provide foundational types and functions for manipulating multilinear polynomials.
+pub mod delegatedsnark;
 pub mod direct;
+pub mod direct_deleg;
 pub mod ppsnark;
 pub mod snark;
+pub mod spark;
 
 #[macro_use]
 mod macros;

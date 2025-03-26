@@ -15,6 +15,7 @@ use crate::{
     CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance,
     RelaxedR1CSWitness,
   },
+  spartan::delegatedsnark::Delegatable,
   traits::{
     circuit::{StepCircuit, TrivialCircuit},
     commitment::CommitmentEngineTrait,
@@ -908,6 +909,250 @@ where
     res_secondary?;
 
     Ok(self.zn.clone())
+  }
+}
+
+/// A type that holds the prover part of the `CompressedSNARK`
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CompressedSNARKProverPart<E1, E2, C, S1, S2>
+where
+  E1: Engine<Base = <E2 as Engine>::Scalar>,
+  E2: Engine<Base = <E1 as Engine>::Scalar>,
+  C: StepCircuit<E1::Scalar>,
+  S1: Delegatable<E1>,
+  S2: Delegatable<E2>,
+{
+  r_U_secondary: RelaxedR1CSInstance<E2>,
+  ri_secondary: E2::Scalar,
+  l_u_secondary: R1CSInstance<E2>,
+  nifs_Uf_secondary: NIFS<E2>,
+
+  l_ur_secondary: RelaxedR1CSInstance<E2>,
+  nifs_Un_secondary: NIFSRelaxed<E2>,
+
+  r_U_primary: RelaxedR1CSInstance<E1>,
+  ri_primary: E1::Scalar,
+  l_ur_primary: RelaxedR1CSInstance<E1>,
+  nifs_Un_primary: NIFSRelaxed<E1>,
+
+  wit_blind_r_Wn_primary: E1::Scalar,
+  err_blind_r_Wn_primary: E1::Scalar,
+  wit_blind_r_Wn_secondary: E2::Scalar,
+  err_blind_r_Wn_secondary: E2::Scalar,
+
+  snark_primary: S1::ProverProofPart,
+  snark_secondary: S2::ProverProofPart,
+
+  zn: Vec<E1::Scalar>,
+
+  _p: PhantomData<C>,
+}
+
+/// Impl for Delegetable SNARKS
+impl<E1, E2, C, S1, S2> CompressedSNARK<E1, E2, C, S1, S2>
+where
+  E1: Engine<Base = <E2 as Engine>::Scalar>,
+  E2: Engine<Base = <E1 as Engine>::Scalar>,
+  C: StepCircuit<E1::Scalar>,
+  S1: Delegatable<E1>,
+  S2: Delegatable<E2>,
+{
+  /// Prove witness-related part of the `CompressedSNARK`
+  pub fn prover_step(
+    pp: &PublicParams<E1, E2, C>,
+    pk: &ProverKey<E1, E2, C, S1, S2>,
+    recursive_snark: &RecursiveSNARK<E1, E2, C>,
+  ) -> Result<
+    (
+      CompressedSNARKProverPart<E1, E2, C, S1, S2>,
+      (Vec<E1::Scalar>, Vec<E1::Scalar>),
+      (Vec<E2::Scalar>, Vec<E2::Scalar>),
+    ),
+    NovaError,
+  > {
+    // prove three foldings
+
+    // fold secondary U/W with secondary u/w to get Uf/Wf
+    let (nifs_Uf_secondary, (r_Uf_secondary, r_Wf_secondary)) = NIFS::prove(
+      &pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      &scalar_as_base::<E1>(pp.digest()),
+      &pp.r1cs_shape_secondary,
+      &recursive_snark.r_U_secondary,
+      &recursive_snark.r_W_secondary,
+      &recursive_snark.l_u_secondary,
+      &recursive_snark.l_w_secondary,
+    )?;
+
+    // fold Uf/Wf with random inst/wit to get U1/W1
+    let (l_ur_secondary, l_wr_secondary) = pp
+      .r1cs_shape_secondary
+      .sample_random_instance_witness(&pp.ck_secondary)?;
+
+    let (nifs_Un_secondary, (r_Un_secondary, r_Wn_secondary)) = NIFSRelaxed::prove(
+      &pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      &scalar_as_base::<E1>(pp.digest()),
+      &pp.r1cs_shape_secondary,
+      &r_Uf_secondary,
+      &r_Wf_secondary,
+      &l_ur_secondary,
+      &l_wr_secondary,
+    )?;
+
+    // fold primary U/W with random inst/wit to get U2/W2
+    let (l_ur_primary, l_wr_primary) = pp
+      .r1cs_shape_primary
+      .sample_random_instance_witness(&pp.ck_primary)?;
+
+    let (nifs_Un_primary, (r_Un_primary, r_Wn_primary)) = NIFSRelaxed::prove(
+      &pp.ck_primary,
+      &pp.ro_consts_primary,
+      &pp.digest(),
+      &pp.r1cs_shape_primary,
+      &recursive_snark.r_U_primary,
+      &recursive_snark.r_W_primary,
+      &l_ur_primary,
+      &l_wr_primary,
+    )?;
+
+    // derandomize/unblind commitments
+    let (derandom_r_Wn_primary, wit_blind_r_Wn_primary, err_blind_r_Wn_primary) =
+      r_Wn_primary.derandomize();
+    let derandom_r_Un_primary = r_Un_primary.derandomize(
+      &E1::CE::derand_key(&pp.ck_primary),
+      &wit_blind_r_Wn_primary,
+      &err_blind_r_Wn_primary,
+    );
+
+    let (derandom_r_Wn_secondary, wit_blind_r_Wn_secondary, err_blind_r_Wn_secondary) =
+      r_Wn_secondary.derandomize();
+    let derandom_r_Un_secondary = r_Un_secondary.derandomize(
+      &E2::CE::derand_key(&pp.ck_secondary),
+      &wit_blind_r_Wn_secondary,
+      &err_blind_r_Wn_secondary,
+    );
+
+    // create SNARKs proving the knowledge of Wn primary/secondary
+    let (snark_primary, snark_secondary) = rayon::join(
+      || {
+        S1::prover_step(
+          &pp.ck_primary,
+          &pk.pk_primary,
+          &pp.r1cs_shape_primary,
+          &derandom_r_Un_primary,
+          &derandom_r_Wn_primary,
+        )
+      },
+      || {
+        S2::prover_step(
+          &pp.ck_secondary,
+          &pk.pk_secondary,
+          &pp.r1cs_shape_secondary,
+          &derandom_r_Un_secondary,
+          &derandom_r_Wn_secondary,
+        )
+      },
+    );
+
+    let (snark_primary, r_primary) = snark_primary?;
+    let (snark_secondary, r_secondary) = snark_secondary?;
+
+    Ok((
+      CompressedSNARKProverPart {
+        r_U_secondary: recursive_snark.r_U_secondary.clone(),
+        ri_secondary: recursive_snark.ri_secondary,
+        l_u_secondary: recursive_snark.l_u_secondary.clone(),
+        nifs_Uf_secondary: nifs_Uf_secondary.clone(),
+
+        l_ur_secondary: l_ur_secondary.clone(),
+        nifs_Un_secondary: nifs_Un_secondary.clone(),
+
+        r_U_primary: recursive_snark.r_U_primary.clone(),
+        ri_primary: recursive_snark.ri_primary,
+        l_ur_primary: l_ur_primary.clone(),
+        nifs_Un_primary: nifs_Un_primary.clone(),
+
+        wit_blind_r_Wn_primary,
+        err_blind_r_Wn_primary,
+        wit_blind_r_Wn_secondary,
+        err_blind_r_Wn_secondary,
+
+        snark_primary: snark_primary,
+        snark_secondary: snark_secondary,
+
+        zn: recursive_snark.zi.clone(),
+
+        _p: Default::default(),
+      },
+      r_primary,
+      r_secondary,
+    ))
+  }
+
+  /// Prover non witness-related part of the `CompressedSNARK`
+  pub fn delegated_step(
+    pp: &PublicParams<E1, E2, C>,
+    pk: &ProverKey<E1, E2, C, S1, S2>,
+    r_primary: (Vec<E1::Scalar>, Vec<E1::Scalar>),
+    r_secondary: (Vec<E2::Scalar>, Vec<E2::Scalar>),
+  ) -> Result<(S1::DelegatedProofPart, S2::DelegatedProofPart), NovaError> {
+    let (snark_primary, snark_secondary) = rayon::join(
+      || {
+        S1::delegated_step(
+          &pp.ck_primary,
+          &pk.pk_primary,
+          &pp.r1cs_shape_primary,
+          (&r_primary.0, &r_primary.1),
+        )
+      },
+      || {
+        S2::delegated_step(
+          &pp.ck_secondary,
+          &pk.pk_secondary,
+          &pp.r1cs_shape_secondary,
+          (&r_secondary.0, &r_secondary.1),
+        )
+      },
+    );
+
+    let snark_primary = snark_primary?;
+    let snark_secondary = snark_secondary?;
+
+    Ok((snark_primary, snark_secondary))
+  }
+
+  /// Combine witness-related and non witness-related parts of the `CompressedSNARK`
+  pub fn combine_proofs(
+    prover_part: CompressedSNARKProverPart<E1, E2, C, S1, S2>,
+    delegated_part: (S1::DelegatedProofPart, S2::DelegatedProofPart),
+  ) -> Result<Self, NovaError> {
+    Ok(Self {
+      r_U_secondary: prover_part.r_U_secondary,
+      ri_secondary: prover_part.ri_secondary,
+      l_u_secondary: prover_part.l_u_secondary,
+      nifs_Uf_secondary: prover_part.nifs_Uf_secondary,
+
+      l_ur_secondary: prover_part.l_ur_secondary,
+      nifs_Un_secondary: prover_part.nifs_Un_secondary,
+
+      r_U_primary: prover_part.r_U_primary,
+      ri_primary: prover_part.ri_primary,
+      l_ur_primary: prover_part.l_ur_primary,
+      nifs_Un_primary: prover_part.nifs_Un_primary,
+
+      wit_blind_r_Wn_primary: prover_part.wit_blind_r_Wn_primary,
+      err_blind_r_Wn_primary: prover_part.err_blind_r_Wn_primary,
+      wit_blind_r_Wn_secondary: prover_part.wit_blind_r_Wn_secondary,
+      err_blind_r_Wn_secondary: prover_part.err_blind_r_Wn_secondary,
+
+      snark_primary: S1::combine_proofs(prover_part.snark_primary, delegated_part.0),
+      snark_secondary: S2::combine_proofs(prover_part.snark_secondary, delegated_part.1),
+
+      zn: prover_part.zn,
+
+      _p: Default::default(),
+    })
   }
 }
 
