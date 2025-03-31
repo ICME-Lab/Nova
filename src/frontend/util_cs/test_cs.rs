@@ -9,7 +9,7 @@ use ff::PrimeField;
 #[derive(Debug)]
 enum NamedObject {
   Constraint,
-  Var,
+  Var(Variable),
   Namespace,
 }
 
@@ -72,7 +72,10 @@ fn eval_lc<Scalar: PrimeField>(
 impl<Scalar: PrimeField> Default for TestConstraintSystem<Scalar> {
   fn default() -> Self {
     let mut map = HashMap::new();
-    map.insert("ONE".into(), NamedObject::Var);
+    map.insert(
+      "ONE".into(),
+      NamedObject::Var(TestConstraintSystem::<Scalar>::one()),
+    );
 
     TestConstraintSystem {
       named_objects: map,
@@ -132,6 +135,36 @@ impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
 
     self.named_objects.insert(path, to);
   }
+
+  /// Set a variable at a given path to a value.
+  pub fn set(&mut self, path: &str, to: Scalar) {
+    match self.named_objects.get(path) {
+      Some(NamedObject::Var(v)) => match v.get_unchecked() {
+        Index::Input(index) => self.inputs[index].0 = to,
+        Index::Aux(index) => self.aux[index].0 = to,
+      },
+      Some(e) => panic!(
+        "tried to set path `{}` to value, but `{:?}` already exists there.",
+        path, e
+      ),
+      _ => panic!("no variable exists at path: {}", path),
+    }
+  }
+
+  /// Get the value of a variable at a given path.
+  pub fn get(&mut self, path: &str) -> Scalar {
+    match self.named_objects.get(path) {
+      Some(NamedObject::Var(v)) => match v.get_unchecked() {
+        Index::Input(index) => self.inputs[index].0,
+        Index::Aux(index) => self.aux[index].0,
+      },
+      Some(e) => panic!(
+        "tried to get value of path `{}`, but `{:?}` exists there (not a variable)",
+        path, e
+      ),
+      _ => panic!("no variable exists at path: {}", path),
+    }
+  }
 }
 
 fn compute_path(ns: &[String], this: &str) -> String {
@@ -161,7 +194,7 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
     let path = compute_path(&self.current_namespace, &annotation().into());
     self.aux.push((f()?, path.clone()));
     let var = Variable::new_unchecked(Index::Aux(index));
-    self.set_named_obj(path, NamedObject::Var);
+    self.set_named_obj(path, NamedObject::Var(var));
 
     Ok(var)
   }
@@ -176,7 +209,7 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
     let path = compute_path(&self.current_namespace, &annotation().into());
     self.inputs.push((f()?, path.clone()));
     let var = Variable::new_unchecked(Index::Input(index));
-    self.set_named_obj(path, NamedObject::Var);
+    self.set_named_obj(path, NamedObject::Var(var));
 
     Ok(var)
   }
@@ -216,5 +249,70 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
 
   fn get_root(&mut self) -> &mut Self::Root {
     self
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::{provider::Bn256EngineIPA, traits::Engine};
+  use ff::Field;
+
+  type Fr = <Bn256EngineIPA as Engine>::Scalar;
+
+  #[test]
+  fn test_compute_path() {
+    assert_eq!(
+      compute_path(
+        &[
+          "hello".to_string(),
+          "world".to_string(),
+          "things".to_string()
+        ],
+        "thing"
+      ),
+      "hello/world/things/thing"
+    );
+  }
+
+  #[test]
+  fn test_cs() {
+    let mut cs = TestConstraintSystem::<Fr>::new();
+    assert!(cs.is_satisfied());
+    assert_eq!(cs.num_constraints(), 0);
+    let a = cs
+      .namespace(|| "a")
+      .alloc(|| "var", || Ok(Fr::from(10u64)))
+      .unwrap();
+    let b = cs
+      .namespace(|| "b")
+      .alloc(|| "var", || Ok(Fr::from(4u64)))
+      .unwrap();
+    let c = cs.alloc(|| "product", || Ok(Fr::from(40u64))).unwrap();
+
+    cs.enforce(|| "mult", |lc| lc + a, |lc| lc + b, |lc| lc + c);
+    assert!(cs.is_satisfied());
+    assert_eq!(cs.num_constraints(), 1);
+
+    cs.set("a/var", Fr::from(4u64));
+
+    let one = TestConstraintSystem::<Fr>::one();
+    cs.enforce(|| "eq", |lc| lc + a, |lc| lc + one, |lc| lc + b);
+
+    assert!(!cs.is_satisfied());
+    assert!(cs.which_is_unsatisfied() == Some("mult"));
+
+    assert!(cs.get("product") == Fr::from(40u64));
+
+    cs.set("product", Fr::from(16u64));
+    assert!(cs.is_satisfied());
+
+    {
+      let mut cs = cs.namespace(|| "test1");
+      let mut cs = cs.namespace(|| "test2");
+      cs.alloc(|| "hehe", || Ok(Fr::ONE)).unwrap();
+    }
+
+    assert!(cs.get("test1/test2/hehe") == Fr::ONE);
   }
 }

@@ -307,6 +307,39 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
     })
   }
 
+  /// Returns (self - other)
+  pub fn sub<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<Scalar>,
+  {
+    let mut value = None;
+
+    let var = cs.alloc(
+      || "sub num",
+      || {
+        let mut tmp = self.value.ok_or(SynthesisError::AssignmentMissing)?;
+        tmp.sub_assign(other.value.ok_or(SynthesisError::AssignmentMissing)?);
+
+        value = Some(tmp);
+
+        Ok(tmp)
+      },
+    )?;
+
+    // Constrain: (a - b) * 1 = a - b
+    cs.enforce(
+      || "subtraction constraint",
+      |lc| lc + self.variable - other.variable,
+      |lc| lc + CS::one(),
+      |lc| lc + var,
+    );
+
+    Ok(AllocatedNum {
+      value,
+      variable: var,
+    })
+  }
+
   /// Multiplies two allocated numbers together, returning a new allocated number.
   pub fn mul<CS>(&self, mut cs: CS, other: &Self) -> Result<Self, SynthesisError>
   where
@@ -404,6 +437,72 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
     Ok(())
   }
 
+  /// Returns the bit `self == 0`
+  pub fn is_zero<CS>(&self, mut cs: CS) -> Result<Boolean, SynthesisError>
+  where
+    CS: ConstraintSystem<Scalar>,
+  {
+    let out = AllocatedBit::alloc(&mut cs.namespace(|| "out bit"), {
+      let input_value = self.value.ok_or(SynthesisError::AssignmentMissing)?;
+      Some(input_value == Scalar::ZERO)
+    })?;
+    let multiplier = Self::alloc(&mut cs.namespace(|| "zero or inverse"), || {
+      let tmp = self.value.ok_or(SynthesisError::AssignmentMissing)?;
+
+      if tmp.is_zero().into() {
+        Ok(Scalar::ZERO)
+      } else {
+        Ok(tmp.invert().unwrap())
+      }
+    })?;
+
+    cs.enforce(
+      || "multiplier * input === 1 - out",
+      |lc| lc + multiplier.variable,
+      |lc| lc + self.variable,
+      |lc| lc + CS::one() - out.get_variable(),
+    );
+
+    cs.enforce(
+      || "out * input === 0",
+      |lc| lc + out.get_variable(),
+      |lc| lc + self.variable,
+      |lc| lc,
+    );
+    Ok(Boolean::from(out))
+  }
+
+  /// Takes two allocated numbers (a, b) and returns
+  /// a if condition is false, and b otherwise
+  pub fn conditionally_select<CS>(
+    mut cs: CS,
+    a: &Self,
+    b: &Self,
+    condition: &Boolean,
+  ) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<Scalar>,
+  {
+    let c = Self::alloc(&mut cs.namespace(|| "alloc output"), || {
+      if condition
+        .get_value()
+        .ok_or(SynthesisError::AssignmentMissing)?
+      {
+        Ok(b.value.ok_or(SynthesisError::AssignmentMissing)?)
+      } else {
+        Ok(a.value.ok_or(SynthesisError::AssignmentMissing)?)
+      }
+    })?;
+    cs.enforce(
+      || "condition * (a - b) === a - c",
+      |_| condition.lc(CS::one(), Scalar::ONE),
+      |lc| lc + a.variable - b.variable,
+      |lc| lc + a.variable - c.variable,
+    );
+
+    Ok(c)
+  }
+
   /// Takes two allocated numbers (a, b) and returns
   /// (b, a) if the condition is true, and (a, b)
   /// otherwise.
@@ -453,6 +552,16 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
     );
 
     Ok((c, d))
+  }
+
+  /// Takes two allocated numbers (self, other) and returns
+  /// the bit `self==other`
+  pub fn is_equal<CS>(&self, mut cs: CS, other: &Self) -> Result<Boolean, SynthesisError>
+  where
+    CS: ConstraintSystem<Scalar>,
+  {
+    let diff = self.sub(&mut cs.namespace(|| "self-other"), other)?;
+    Self::is_zero(&diff, cs)
   }
 
   /// Get scalar value of the [`AllocatedNum`].
