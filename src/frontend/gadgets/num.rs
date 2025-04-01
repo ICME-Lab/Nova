@@ -443,7 +443,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
     CS: ConstraintSystem<Scalar>,
   {
     let out = AllocatedBit::alloc(&mut cs.namespace(|| "out bit"), {
-      let input_value = self.value.ok_or(SynthesisError::AssignmentMissing)?;
+      let input_value = self.value.unwrap_or_default();
       Some(input_value == Scalar::ZERO)
     })?;
     let multiplier = Self::alloc(&mut cs.namespace(|| "zero or inverse"), || {
