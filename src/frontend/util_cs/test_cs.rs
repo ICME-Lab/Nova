@@ -98,6 +98,11 @@ impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
     self.constraints.len()
   }
 
+  /// Get the number of inputs
+  pub fn num_inputs(&self) -> usize {
+    self.inputs.len()
+  }
+
   /// Get path which is unsatisfied
   pub fn which_is_unsatisfied(&self) -> Option<&str> {
     for (a, b, c, path) in &self.constraints {

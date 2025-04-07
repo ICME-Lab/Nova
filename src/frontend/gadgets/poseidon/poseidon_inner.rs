@@ -21,7 +21,7 @@ use super::{
 pub trait Arity<T>: ArrayLength {
   /// Must be Arity + 1.
   type ConstantsSize: ArrayLength;
-
+  /// Returns the arity tag for this arity.
   fn tag() -> T;
 }
 
