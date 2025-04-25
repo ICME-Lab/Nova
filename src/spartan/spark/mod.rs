@@ -3,12 +3,118 @@
 use crate::{
   errors::NovaError,
   r1cs::R1CSShape,
-  spartan::math::Math,
+  spartan::{math::Math, PolyEvalInstance, PolyEvalWitness},
   traits::{evaluation::EvaluationEngineTrait, Engine, TranscriptReprTrait},
   CommitmentKey,
 };
 use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
+
+/* /// A type that holds a witness to a polynomial evaluation instance
+#[allow(dead_code)]
+pub struct PolyEvalWitness<E: Engine> {
+  p: Vec<E::Scalar>, // polynomial
+}
+
+impl<E: Engine> PolyEvalWitness<E> {
+  fn pad(W: &[PolyEvalWitness<E>]) -> Vec<PolyEvalWitness<E>> {
+    // determine the maximum size
+    if let Some(n) = W.iter().map(|w| w.p.len()).max() {
+      W.iter()
+        .map(|w| {
+          let mut p = w.p.clone();
+          p.resize(n, E::Scalar::ZERO);
+          PolyEvalWitness { p }
+        })
+        .collect()
+    } else {
+      Vec::new()
+    }
+  }
+
+  fn weighted_sum(W: &[PolyEvalWitness<E>], s: &[E::Scalar]) -> PolyEvalWitness<E> {
+    assert_eq!(W.len(), s.len());
+    let mut p = vec![E::Scalar::ZERO; W[0].p.len()];
+    for i in 0..W.len() {
+      for j in 0..W[i].p.len() {
+        p[j] += W[i].p[j] * s[i]
+      }
+    }
+    PolyEvalWitness { p }
+  }
+}
+
+/// A type that holds a polynomial evaluation instance
+#[allow(dead_code)]
+pub struct PolyEvalInstance<G: Engine> {
+  c: Commitment<G>,  // commitment to the polynomial
+  x: Vec<G::Scalar>, // evaluation point
+  e: G::Scalar,      // claimed evaluation
+}
+
+impl<G: Engine> PolyEvalInstance<G> {
+  fn pad(U: &[PolyEvalInstance<G>]) -> Vec<PolyEvalInstance<G>> {
+    // determine the maximum size
+    if let Some(ell) = U.iter().map(|u| u.x.len()).max() {
+      U.iter()
+        .map(|u| {
+          let mut x = vec![G::Scalar::ZERO; ell - u.x.len()];
+          x.extend(u.x.clone());
+          PolyEvalInstance { c: u.c, x, e: u.e }
+        })
+        .collect()
+    } else {
+      Vec::new()
+    }
+  }
+} */
+
+/// Engine to compute the commitment and decommitment for the Spark protocol
+pub trait CompCommitmentEngineTrait<E: Engine> {
+  /// A type that holds opening hint
+  type Decommitment: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+
+  /// A type that holds a commitment
+  type Commitment: Clone
+    + Send
+    + Sync
+    + TranscriptReprTrait<E::GE>
+    + Serialize
+    + for<'de> Deserialize<'de>;
+
+  /// A type that holds an evaluation argument
+  type EvaluationArgument: Send + Sync + Serialize + for<'de> Deserialize<'de>;
+
+  /// commits to R1CS matrices
+  fn commit(
+    ck: &CommitmentKey<E>,
+    S: &R1CSShape<E>,
+  ) -> Result<(Self::Commitment, Self::Decommitment), NovaError>;
+
+  /// proves an evaluation of R1CS matrices viewed as polynomials
+  fn prove(
+    ck: &CommitmentKey<E>,
+    S: &R1CSShape<E>,
+    decomm: &Self::Decommitment,
+    comm: &Self::Commitment,
+    r: &(&[E::Scalar], &[E::Scalar]),
+    transcript: &mut E::TE,
+  ) -> Result<
+    (
+      Self::EvaluationArgument,
+      Vec<(PolyEvalWitness<E>, PolyEvalInstance<E>)>,
+    ),
+    NovaError,
+  >;
+
+  /// verifies an evaluation of R1CS matrices viewed as polynomials and returns verified evaluations
+  fn verify(
+    comm: &Self::Commitment,
+    r: &(&[E::Scalar], &[E::Scalar]),
+    arg: &Self::EvaluationArgument,
+    transcript: &mut E::TE,
+  ) -> Result<(E::Scalar, E::Scalar, E::Scalar, Vec<PolyEvalInstance<E>>), NovaError>;
+}
 
 /// A trivial implementation of `ComputationCommitmentEngineTrait`
 pub struct TrivialCompComputationEngine<E: Engine, EE: EvaluationEngineTrait<E>> {
@@ -43,7 +149,7 @@ impl<E: Engine> TranscriptReprTrait<E::GE> for TrivialCommitment<E> {
   }
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> CompCommitmentEngineTrait<E, EE>
+impl<E: Engine, EE: EvaluationEngineTrait<E>> CompCommitmentEngineTrait<E>
   for TrivialCompComputationEngine<E, EE>
 {
   type Decommitment = TrivialDecommitment<E>;
@@ -66,29 +172,36 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> CompCommitmentEngineTrait<E, EE>
   /// proves an evaluation of R1CS matrices viewed as polynomials
   fn prove(
     _ck: &CommitmentKey<E>,
-    _ek: &EE::ProverKey,
     _S: &R1CSShape<E>,
     _decomm: &Self::Decommitment,
     _comm: &Self::Commitment,
     _r: &(&[E::Scalar], &[E::Scalar]),
     _transcript: &mut E::TE,
-  ) -> Result<Self::EvaluationArgument, NovaError> {
-    Ok(TrivialEvaluationArgument {
-      _p: Default::default(),
-    })
+  ) -> Result<
+    (
+      Self::EvaluationArgument,
+      Vec<(PolyEvalWitness<E>, PolyEvalInstance<E>)>,
+    ),
+    NovaError,
+  > {
+    Ok((
+      TrivialEvaluationArgument {
+        _p: Default::default(),
+      },
+      Vec::new(),
+    ))
   }
 
   /// verifies an evaluation of R1CS matrices viewed as polynomials
   fn verify(
-    _vk: &EE::VerifierKey,
     comm: &Self::Commitment,
     r: &(&[E::Scalar], &[E::Scalar]),
     _arg: &Self::EvaluationArgument,
     _transcript: &mut E::TE,
-  ) -> Result<(E::Scalar, E::Scalar, E::Scalar), NovaError> {
+  ) -> Result<(E::Scalar, E::Scalar, E::Scalar, Vec<PolyEvalInstance<E>>), NovaError> {
     let (r_x, r_y) = r;
     let evals = SparsePolynomial::<E>::multi_evaluate(&[&comm.S.A, &comm.S.B, &comm.S.C], r_x, r_y);
-    Ok((evals[0], evals[1], evals[2]))
+    Ok((evals[0], evals[1], evals[2], Vec::new()))
   }
 }
 
@@ -98,9 +211,8 @@ mod sparse;
 use sparse::{SparseEvaluationArgument, SparsePolynomial, SparsePolynomialCommitment};
 
 /// A non-trivial implementation of `CompCommitmentEngineTrait` using Spartan's SPARK compiler
-pub struct SparkEngine<E: Engine, EE: EvaluationEngineTrait<E>> {
+pub struct SparkEngine<E: Engine> {
   _p: PhantomData<E>,
-  _p2: PhantomData<EE>,
 }
 
 /// An implementation of Spark decommitment
@@ -156,18 +268,16 @@ impl<E: Engine> TranscriptReprTrait<E::GE> for SparkCommitment<E> {
 /// Provides an implementation of a trivial evaluation argument
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct SparkEvaluationArgument<E: Engine, EE: EvaluationEngineTrait<E>> {
-  arg_A: SparseEvaluationArgument<E, EE>,
-  arg_B: SparseEvaluationArgument<E, EE>,
-  arg_C: SparseEvaluationArgument<E, EE>,
+pub struct SparkEvaluationArgument<E: Engine> {
+  arg_A: SparseEvaluationArgument<E>,
+  arg_B: SparseEvaluationArgument<E>,
+  arg_C: SparseEvaluationArgument<E>,
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> CompCommitmentEngineTrait<E, EE>
-  for SparkEngine<E, EE>
-{
+impl<E: Engine> CompCommitmentEngineTrait<E> for SparkEngine<E> {
   type Decommitment = SparkDecommitment<E>;
   type Commitment = SparkCommitment<E>;
-  type EvaluationArgument = SparkEvaluationArgument<E, EE>;
+  type EvaluationArgument = SparkEvaluationArgument<E>;
 
   /// commits to R1CS matrices
   fn commit(
@@ -182,82 +292,60 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> CompCommitmentEngineTrait<E, EE>
   /// proves an evaluation of R1CS matrices viewed as polynomials
   fn prove(
     ck: &CommitmentKey<E>,
-    pk_ee: &EE::ProverKey,
     S: &R1CSShape<E>,
     decomm: &Self::Decommitment,
     comm: &Self::Commitment,
     r: &(&[E::Scalar], &[E::Scalar]),
     transcript: &mut E::TE,
-  ) -> Result<Self::EvaluationArgument, NovaError> {
-    let arg_A =
-      SparseEvaluationArgument::prove(ck, pk_ee, &decomm.A, &S.A, &comm.comm_A, r, transcript)?;
-    let arg_B =
-      SparseEvaluationArgument::prove(ck, pk_ee, &decomm.B, &S.B, &comm.comm_B, r, transcript)?;
-    let arg_C =
-      SparseEvaluationArgument::prove(ck, pk_ee, &decomm.C, &S.C, &comm.comm_C, r, transcript)?;
+  ) -> Result<
+    (
+      Self::EvaluationArgument,
+      Vec<(PolyEvalWitness<E>, PolyEvalInstance<E>)>,
+    ),
+    NovaError,
+  > {
+    let (arg_A, u_w_vec_A) =
+      SparseEvaluationArgument::prove(ck, &decomm.A, &S.A, &comm.comm_A, r, transcript)?;
+    let (arg_B, u_w_vec_B) =
+      SparseEvaluationArgument::prove(ck, &decomm.B, &S.B, &comm.comm_B, r, transcript)?;
+    let (arg_C, u_w_vec_C) =
+      SparseEvaluationArgument::prove(ck, &decomm.C, &S.C, &comm.comm_C, r, transcript)?;
 
-    Ok(SparkEvaluationArgument {
-      arg_A,
-      arg_B,
-      arg_C,
-    })
+    let u_w_vec = {
+      let mut u_w_vec = u_w_vec_A;
+      u_w_vec.extend(u_w_vec_B);
+      u_w_vec.extend(u_w_vec_C);
+      u_w_vec
+    };
+
+    Ok((
+      SparkEvaluationArgument {
+        arg_A,
+        arg_B,
+        arg_C,
+      },
+      u_w_vec,
+    ))
   }
 
   /// verifies an evaluation of R1CS matrices viewed as polynomials
   fn verify(
-    vk_ee: &EE::VerifierKey,
     comm: &Self::Commitment,
     r: &(&[E::Scalar], &[E::Scalar]),
     arg: &Self::EvaluationArgument,
     transcript: &mut E::TE,
-  ) -> Result<(E::Scalar, E::Scalar, E::Scalar), NovaError> {
-    let eval_A = arg.arg_A.verify(vk_ee, &comm.comm_A, r, transcript)?;
-    let eval_B = arg.arg_B.verify(vk_ee, &comm.comm_B, r, transcript)?;
-    let eval_C = arg.arg_C.verify(vk_ee, &comm.comm_C, r, transcript)?;
+  ) -> Result<(E::Scalar, E::Scalar, E::Scalar, Vec<PolyEvalInstance<E>>), NovaError> {
+    let (eval_A, u_vec_A) = arg.arg_A.verify(&comm.comm_A, r, transcript)?;
+    let (eval_B, u_vec_B) = arg.arg_B.verify(&comm.comm_B, r, transcript)?;
+    let (eval_C, u_vec_C) = arg.arg_C.verify(&comm.comm_C, r, transcript)?;
 
-    Ok((eval_A, eval_B, eval_C))
+    let u_vec = {
+      let mut u_vec = u_vec_A;
+      u_vec.extend(u_vec_B);
+      u_vec.extend(u_vec_C);
+      u_vec
+    };
+
+    Ok((eval_A, eval_B, eval_C, u_vec))
   }
-}
-
-/// Engine to compute the commitment and decommitment for the Spark protocol
-pub trait CompCommitmentEngineTrait<E: Engine, EE: EvaluationEngineTrait<E>> {
-  /// A type that holds opening hint
-  type Decommitment: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
-
-  /// A type that holds a commitment
-  type Commitment: Clone
-    + Send
-    + Sync
-    + TranscriptReprTrait<E::GE>
-    + Serialize
-    + for<'de> Deserialize<'de>;
-
-  /// A type that holds an evaluation argument
-  type EvaluationArgument: Send + Sync + Serialize + for<'de> Deserialize<'de>;
-
-  /// commits to R1CS matrices
-  fn commit(
-    ck: &CommitmentKey<E>,
-    S: &R1CSShape<E>,
-  ) -> Result<(Self::Commitment, Self::Decommitment), NovaError>;
-
-  /// proves an evaluation of R1CS matrices viewed as polynomials
-  fn prove(
-    ck: &CommitmentKey<E>,
-    ek: &EE::ProverKey,
-    S: &R1CSShape<E>,
-    decomm: &Self::Decommitment,
-    comm: &Self::Commitment,
-    r: &(&[E::Scalar], &[E::Scalar]),
-    transcript: &mut E::TE,
-  ) -> Result<Self::EvaluationArgument, NovaError>;
-
-  /// verifies an evaluation of R1CS matrices viewed as polynomials and returns verified evaluations
-  fn verify(
-    vk: &EE::VerifierKey,
-    comm: &Self::Commitment,
-    r: &(&[E::Scalar], &[E::Scalar]),
-    arg: &Self::EvaluationArgument,
-    transcript: &mut E::TE,
-  ) -> Result<(E::Scalar, E::Scalar, E::Scalar), NovaError>;
 }

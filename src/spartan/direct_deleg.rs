@@ -466,7 +466,7 @@ mod tests {
 
     type E2 = Bn256EngineKZG;
     type EE2 = crate::provider::hyperkzg::EvaluationEngine<E2>;
-    type CC2 = SparkEngine<E2, EE2>;
+    type CC2 = SparkEngine<E2>;
 
     type S2 = crate::spartan::snark::RelaxedR1CSSNARK<E2, EE2>;
     test_direct_snark_with::<E2, S2>("snark", num_steps);

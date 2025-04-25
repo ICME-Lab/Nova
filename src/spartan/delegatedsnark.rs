@@ -19,13 +19,14 @@ use crate::{
     },
     spark::CompCommitmentEngineTrait,
     sumcheck::SumcheckProof,
+    PolyEvalInstance, PolyEvalWitness,
   },
   traits::{
     evaluation::EvaluationEngineTrait,
     snark::{DigestHelperTrait, RelaxedR1CSSNARKTrait},
     Engine, TranscriptEngineTrait,
   },
-  CommitmentKey,
+  Commitment, CommitmentKey,
 };
 use ff::Field;
 use once_cell::sync::OnceCell;
@@ -35,8 +36,7 @@ use serde::{Deserialize, Serialize};
 /// A type that represents the prover's key
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>>
-{
+pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>> {
   pk_ee: EE::ProverKey,
   S: R1CSShape<E>,
   decomm: CC::Decommitment,
@@ -46,11 +46,7 @@ pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitment
 /// A type that represents the verifier's key
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct VerifierKey<
-  E: Engine,
-  EE: EvaluationEngineTrait<E>,
-  CC: CompCommitmentEngineTrait<E, EE>,
-> {
+pub struct VerifierKey<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>> {
   num_cons: usize,
   num_vars: usize,
   vk_ee: EE::VerifierKey,
@@ -59,7 +55,7 @@ pub struct VerifierKey<
   digest: OnceCell<E::Scalar>,
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>>
+impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>>
   VerifierKey<E, EE, CC>
 {
   fn new(num_cons: usize, num_vars: usize, S_comm: CC::Commitment, vk_ee: EE::VerifierKey) -> Self {
@@ -72,8 +68,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
     }
   }
 }
-impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>>
-  DigestHelperTrait<E> for VerifierKey<E, EE, CC>
+impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>> DigestHelperTrait<E>
+  for VerifierKey<E, EE, CC>
 {
   /// Returns the digest of the verifier's key
   fn digest(&self) -> E::Scalar {
@@ -88,7 +84,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
   }
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>> SimpleDigestible
+impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>> SimpleDigestible
   for VerifierKey<E, EE, CC>
 {
 }
@@ -101,21 +97,24 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
 pub struct RelaxedR1CSSNARK<
   E: Engine,
   EE: EvaluationEngineTrait<E>,
-  CC: CompCommitmentEngineTrait<E, EE>,
+  CC: CompCommitmentEngineTrait<E>,
 > {
   sc_proof_outer: SumcheckProof<E>,
   claims_outer: (E::Scalar, E::Scalar, E::Scalar),
   eval_E: E::Scalar,
   sc_proof_inner: SumcheckProof<E>,
   eval_W: E::Scalar,
-  sc_proof_batch: SumcheckProof<E>,
-  eval_E_prime: E::Scalar,
-  eval_W_prime: E::Scalar,
-  eval_arg: EE::EvaluationArgument,
+  sc_proof_batch_prover: SumcheckProof<E>,
+  eval_arg_prover: EE::EvaluationArgument,
+  evals_batch_prover: Vec<E::Scalar>,
+
   eval_arg_cc: CC::EvaluationArgument,
+  sc_proof_batch_deleg: SumcheckProof<E>,
+  eval_arg_deleg: EE::EvaluationArgument,
+  evals_batch_deleg: Vec<E::Scalar>,
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>>
+impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>>
   RelaxedR1CSSNARKTrait<E> for RelaxedR1CSSNARK<E, EE, CC>
 {
   type ProverKey = ProverKey<E, EE, CC>;
@@ -233,19 +232,107 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
       (E::Scalar::ONE - r_y[0]) * self.eval_W + r_y[0] * eval_X
     };
 
+    let mut u_vec_prover: Vec<PolyEvalInstance<E>> = Vec::new();
+    u_vec_prover.push(PolyEvalInstance {
+      c: U.comm_W,
+      x: r_y[1..].to_vec(),
+      e: self.eval_W,
+    });
+
+    u_vec_prover.push(PolyEvalInstance {
+      c: U.comm_E,
+      x: r_x.clone(),
+      e: self.eval_E,
+    });
+
+    let u_vec_padded_prover = PolyEvalInstance::pad(&u_vec_prover); // pad the evaluation points
+
+    let powers = |s: &E::Scalar, n: usize| -> Vec<E::Scalar> {
+      assert!(n >= 1);
+      let mut powers = Vec::new();
+      powers.push(E::Scalar::ONE);
+      for i in 1..n {
+        powers.push(powers[i - 1] * s);
+      }
+      powers
+    };
+
+    // generate a challenge
+    let rho = transcript.squeeze(b"r")?;
+    let num_claims = u_vec_prover.len();
+    let powers_of_rho = powers(&rho, num_claims);
+    let claim_batch_joint_prover = u_vec_prover
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(u, p)| u.e * p)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
+
+    let num_rounds_z = u_vec_padded_prover[0].x.len();
+    let (claim_batch_prover_final, r_z) = self.sc_proof_batch_prover.verify(
+      claim_batch_joint_prover,
+      num_rounds_z,
+      2,
+      &mut transcript,
+    )?;
+
+    let claim_batch_prover_final_expected = {
+      let poly_rz = EqPolynomial::new(r_z.clone());
+      let evals = u_vec_padded_prover
+        .iter()
+        .map(|u| poly_rz.evaluate(&u.x))
+        .collect::<Vec<E::Scalar>>();
+
+      evals
+        .iter()
+        .zip(self.evals_batch_prover.iter())
+        .zip(powers_of_rho.iter())
+        .map(|((e_i, p_i), rho_i)| *e_i * *p_i * rho_i)
+        .fold(E::Scalar::ZERO, |acc, item| acc + item)
+    };
+
+    if claim_batch_prover_final != claim_batch_prover_final_expected {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    transcript.absorb(b"l", &self.evals_batch_prover.as_slice());
+
+    // we now combine evaluation claims at the same point rz into one
+    let gamma = transcript.squeeze(b"g")?;
+    let powers_of_gamma: Vec<E::Scalar> = powers(&gamma, num_claims);
+    let comm_joint_prover = u_vec_padded_prover
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(u, g_i)| u.c * *g_i)
+      .fold(Commitment::<E>::default(), |acc, item| acc + item);
+    let eval_joint_prover = self
+      .evals_batch_prover
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(e, g_i)| *e * *g_i)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
+
+    // verify
+    EE::verify(
+      &vk.vk_ee,
+      &mut transcript,
+      &comm_joint_prover,
+      &r_z,
+      &eval_joint_prover,
+      &self.eval_arg_prover,
+    )?;
+
     // verify evaluation argument to retrieve evaluations of R1CS matrices
 
-    // CHANGED TO USE A DIFFERENT TRANSCRIPT
+    // CHANEED TO USE A DIFFERENT TRANSCRIPT
     // this second transcript is fed with r_x and r_y
-    let mut transcript_Delegated = E::TE::new(b"RelaxedR1CSSNARK_Delegated");
-    transcript_Delegated.absorb(b"r_x", &r_x.as_slice());
-    transcript_Delegated.absorb(b"r_y", &r_y.as_slice());
-    let (eval_A, eval_B, eval_C) = CC::verify(
-      &vk.vk_ee,
+    let mut transcript_delegated = E::TE::new(b"RelaxedR1CSSNARK_Delegated");
+    transcript_delegated.absorb(b"r_x", &r_x.as_slice());
+    transcript_delegated.absorb(b"r_y", &r_y.as_slice());
+    let (eval_A, eval_B, eval_C, u_vec_deleg) = CC::verify(
       &vk.comm,
       &(&r_x, &r_y),
       &self.eval_arg_cc,
-      &mut transcript_Delegated,
+      &mut transcript_delegated,
     )?;
 
     let claim_inner_final_expected = (eval_A + r * eval_B + r * r * eval_C) * eval_Z;
@@ -253,46 +340,70 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
       return Err(NovaError::InvalidSumcheckProof);
     }
 
-    // batch sum-check
-    transcript.absorb(b"eval_W", &self.eval_W);
+    let u_vec_padded_deleg = PolyEvalInstance::pad(&u_vec_deleg); // pad the evaluation points
 
-    let rho = transcript.squeeze(b"rho")?;
-    let claim_batch_joint = self.eval_E + rho * self.eval_W;
-    let num_rounds_z = num_rounds_x;
-    let (claim_batch_final, r_z) =
-      self
-        .sc_proof_batch
-        .verify(claim_batch_joint, num_rounds_z, 2, &mut transcript)?;
+    // generate a challenge
+    let rho = transcript_delegated.squeeze(b"r")?;
+    let num_claims = u_vec_deleg.len();
+    let powers_of_rho = powers(&rho, num_claims);
+    let claim_batch_joint_deleg = u_vec_deleg
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(u, p)| u.e * p)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
 
-    let claim_batch_final_expected = {
+    let num_rounds_z = u_vec_padded_deleg[0].x.len();
+    let (claim_batch_deleg_final, r_z) = self.sc_proof_batch_deleg.verify(
+      claim_batch_joint_deleg,
+      num_rounds_z,
+      2,
+      &mut transcript_delegated,
+    )?;
+
+    let claim_batch_deleg_final_expected = {
       let poly_rz = EqPolynomial::new(r_z.clone());
-      let rz_rx = poly_rz.evaluate(&r_x);
-      let rz_ry = poly_rz.evaluate(&r_y[1..]);
-      rz_rx * self.eval_E_prime + rho * rz_ry * self.eval_W_prime
+      let evals = u_vec_padded_deleg
+        .iter()
+        .map(|u| poly_rz.evaluate(&u.x))
+        .collect::<Vec<E::Scalar>>();
+
+      evals
+        .iter()
+        .zip(self.evals_batch_deleg.iter())
+        .zip(powers_of_rho.iter())
+        .map(|((e_i, p_i), rho_i)| *e_i * *p_i * rho_i)
+        .fold(E::Scalar::ZERO, |acc, item| acc + item)
     };
 
-    if claim_batch_final != claim_batch_final_expected {
+    if claim_batch_deleg_final != claim_batch_deleg_final_expected {
       return Err(NovaError::InvalidSumcheckProof);
     }
 
-    transcript.absorb(
-      b"claims_batch",
-      &[self.eval_E_prime, self.eval_W_prime].as_slice(),
-    );
+    transcript_delegated.absorb(b"l", &self.evals_batch_deleg.as_slice());
 
     // we now combine evaluation claims at the same point rz into one
-    let gamma = transcript.squeeze(b"gamma")?;
-    let comm = U.comm_E + U.comm_W * gamma;
-    let eval = self.eval_E_prime + gamma * self.eval_W_prime;
+    let gamma = transcript_delegated.squeeze(b"g")?;
+    let powers_of_gamma: Vec<E::Scalar> = powers(&gamma, num_claims);
+    let comm_joint_deleg = u_vec_padded_deleg
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(u, g_i)| u.c * *g_i)
+      .fold(Commitment::<E>::default(), |acc, item| acc + item);
+    let eval_joint_deleg = self
+      .evals_batch_deleg
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(e, g_i)| *e * *g_i)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
 
-    // verify eval_W and eval_E
+    // verify
     EE::verify(
       &vk.vk_ee,
-      &mut transcript,
-      &comm,
+      &mut transcript_delegated,
+      &comm_joint_deleg,
       &r_z,
-      &eval,
-      &self.eval_arg,
+      &eval_joint_deleg,
+      &self.eval_arg_deleg,
     )?;
 
     Ok(())
@@ -341,10 +452,9 @@ pub struct RelaxedR1CSProver<E: Engine, EE: EvaluationEngineTrait<E>> {
   eval_E: E::Scalar,
   sc_proof_inner: SumcheckProof<E>,
   eval_W: E::Scalar,
-  sc_proof_batch: SumcheckProof<E>,
-  eval_E_prime: E::Scalar,
-  eval_W_prime: E::Scalar,
-  eval_arg: EE::EvaluationArgument,
+  sc_proof_batch_prover: SumcheckProof<E>,
+  eval_arg_prover: EE::EvaluationArgument,
+  evals_batch_prover: Vec<E::Scalar>,
 }
 
 /// A type that represents the non-witness related part of the proof
@@ -353,12 +463,15 @@ pub struct RelaxedR1CSProver<E: Engine, EE: EvaluationEngineTrait<E>> {
 pub struct RelaxedR1CSDelegated<
   E: Engine,
   EE: EvaluationEngineTrait<E>,
-  CC: CompCommitmentEngineTrait<E, EE>,
+  CC: CompCommitmentEngineTrait<E>,
 > {
   eval_arg_cc: CC::EvaluationArgument,
+  sc_proof_batch_deleg: SumcheckProof<E>,
+  eval_arg_deleg: EE::EvaluationArgument,
+  evals_batch_deleg: Vec<E::Scalar>,
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, EE>> Delegatable<E>
+impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E>> Delegatable<E>
   for RelaxedR1CSSNARK<E, EE, CC>
 {
   type ProverProofPart = RelaxedR1CSProver<E, EE>;
@@ -509,53 +622,111 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
       &mut transcript,
     )?;
 
-    let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
-    transcript.absorb(b"eval_W", &eval_W);
+    let eval_W = MultilinearPolynomial::evaluate_with(&W.W, &r_y[1..]);
+    let mut w_u_vec = Vec::new();
+    w_u_vec.push((
+      PolyEvalWitness { p: W.W.clone() },
+      PolyEvalInstance {
+        c: U.comm_W,
+        x: r_y[1..].to_vec(),
+        e: eval_W,
+      },
+    ));
 
-    // We will now reduce eval_W =? W(r_y[1..]) and eval_W =? E(r_x) into
+    w_u_vec.push((
+      PolyEvalWitness { p: W.E },
+      PolyEvalInstance {
+        c: U.comm_E,
+        x: r_x.clone(),
+        e: eval_E,
+      },
+    ));
+
+    // We will now reduce a vector of claims of evaluations at different points into claims about them at the same point.
+    // For example, eval_W =? W(r_y[1..]) and eval_W =? E(r_x) into
     // two claims: eval_W_prime =? W(rz) and eval_E_prime =? E(rz)
     // We can them combine the two into one: eval_W_prime + gamma * eval_E_prime =? (W + gamma*E)(rz),
     // where gamma is a public challenge
     // Since commitments to W and E are homomorphic, the verifier can compute a commitment
     // to the batched polynomial.
-    let rho = transcript.squeeze(b"rho")?;
+    assert!(w_u_vec.len() >= 2);
 
-    let claim_batch_joint = eval_E + rho * eval_W;
-    let num_rounds_z = num_rounds_x;
-    let comb_func =
-      |poly_A_comp: &E::Scalar,
-       poly_B_comp: &E::Scalar,
-       poly_C_comp: &E::Scalar,
-       poly_D_comp: &E::Scalar|
-       -> E::Scalar { *poly_A_comp * *poly_B_comp + rho * *poly_C_comp * *poly_D_comp };
-    let (sc_proof_batch, r_z, claims_batch) = SumcheckProof::prove_quad_sum(
+    let (w_vec, u_vec): (Vec<PolyEvalWitness<E>>, Vec<PolyEvalInstance<E>>) =
+      w_u_vec.into_iter().unzip();
+    let w_vec_padded = PolyEvalWitness::pad(&w_vec); // pad the polynomials to be of the same size
+    let u_vec_padded = PolyEvalInstance::pad(&u_vec); // pad the evaluation points
+
+    let powers = |s: &E::Scalar, n: usize| -> Vec<E::Scalar> {
+      assert!(n >= 1);
+      let mut powers = Vec::new();
+      powers.push(E::Scalar::ONE);
+      for i in 1..n {
+        powers.push(powers[i - 1] * s);
+      }
+      powers
+    };
+
+    // generate a challenge
+    let rho = transcript.squeeze(b"r")?;
+    let num_claims = w_vec_padded.len();
+    let powers_of_rho = powers(&rho, num_claims);
+    let claim_batch_joint = u_vec_padded
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(u, p)| u.e * p)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
+
+    let mut polys_left: Vec<MultilinearPolynomial<E::Scalar>> = w_vec_padded
+      .iter()
+      .map(|w| MultilinearPolynomial::new(w.p.clone()))
+      .collect();
+    let mut polys_right: Vec<MultilinearPolynomial<E::Scalar>> = u_vec_padded
+      .iter()
+      .map(|u| MultilinearPolynomial::new(EqPolynomial::new(u.x.clone()).evals()))
+      .collect();
+
+    let num_rounds_z = u_vec_padded[0].x.len();
+    let comb_func = |poly_A_comp: &E::Scalar, poly_B_comp: &E::Scalar| -> E::Scalar {
+      *poly_A_comp * *poly_B_comp
+    };
+    let (sc_proof_batch_prover, r_z, claims_batch) = SumcheckProof::prove_quad_batch_scaled(
       &claim_batch_joint,
       num_rounds_z,
-      &mut MultilinearPolynomial::new(EqPolynomial::new(r_x.clone()).evals()),
-      &mut MultilinearPolynomial::new(W.E.clone()),
-      &mut MultilinearPolynomial::new(EqPolynomial::new(r_y[1..].to_vec()).evals()),
-      &mut MultilinearPolynomial::new(W.W.clone()),
+      &mut polys_left,
+      &mut polys_right,
+      &powers_of_rho,
       comb_func,
       &mut transcript,
     )?;
 
-    let eval_E_prime = claims_batch[1];
-    let eval_W_prime = claims_batch[3];
-    transcript.absorb(b"claims_batch", &[eval_E_prime, eval_W_prime].as_slice());
+    let (claims_batch_left, _): (Vec<E::Scalar>, Vec<E::Scalar>) = claims_batch;
+
+    transcript.absorb(b"l", &claims_batch_left.as_slice());
 
     // we now combine evaluation claims at the same point rz into one
-    let gamma = transcript.squeeze(b"gamma")?;
-    let comm = U.comm_E + U.comm_W * gamma;
-    let poly = W
-      .E
+    let gamma = transcript.squeeze(b"g")?;
+    let powers_of_gamma: Vec<E::Scalar> = powers(&gamma, num_claims);
+    let comm_joint = u_vec_padded
       .iter()
-      .zip(W.W.iter())
-      .map(|(e, w)| *e + gamma * w)
-      .collect::<Vec<E::Scalar>>();
-    let eval = eval_E_prime + gamma * eval_W_prime;
+      .zip(powers_of_gamma.iter())
+      .map(|(u, g_i)| u.c * *g_i)
+      .fold(Commitment::<E>::default(), |acc, item| acc + item);
+    let poly_joint = PolyEvalWitness::weighted_sum(&w_vec_padded, &powers_of_gamma);
+    let eval_joint = claims_batch_left
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(e, g_i)| *e * *g_i)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
 
-    let eval_arg = EE::prove(ck, &pk.pk_ee, &mut transcript, &comm, &poly, &r_z, &eval)?;
-
+    let eval_arg_prover = EE::prove(
+      ck,
+      &pk.pk_ee,
+      &mut transcript,
+      &comm_joint,
+      &poly_joint.p,
+      &r_z,
+      &eval_joint,
+    )?;
     Ok((
       Self::ProverProofPart {
         sc_proof_outer,
@@ -563,10 +734,9 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
         eval_E,
         sc_proof_inner,
         eval_W,
-        sc_proof_batch,
-        eval_E_prime,
-        eval_W_prime,
-        eval_arg,
+        sc_proof_batch_prover,
+        eval_arg_prover,
+        evals_batch_prover: claims_batch_left,
       },
       (r_x, r_y),
     ))
@@ -582,16 +752,90 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
     let mut transcript = E::TE::new(b"RelaxedR1CSSNARK_Delegated");
     transcript.absorb(b"r_x", &r.0);
     transcript.absorb(b"r_y", &r.1);
-    let eval_arg_cc = CC::prove(
-      ck,
-      &pk.pk_ee,
-      &pk.S,
-      &pk.decomm,
-      &pk.comm,
-      &r,
+    let (eval_arg_cc, w_u_vec) = CC::prove(ck, &pk.S, &pk.decomm, &pk.comm, &r, &mut transcript)?;
+    let (w_vec, u_vec): (Vec<PolyEvalWitness<E>>, Vec<PolyEvalInstance<E>>) =
+      w_u_vec.into_iter().unzip();
+    let w_vec_padded = PolyEvalWitness::pad(&w_vec); // pad the polynomials to be of the same size
+    let u_vec_padded = PolyEvalInstance::pad(&u_vec); // pad the evaluation points
+
+    let powers = |s: &E::Scalar, n: usize| -> Vec<E::Scalar> {
+      assert!(n >= 1);
+      let mut powers = Vec::new();
+      powers.push(E::Scalar::ONE);
+      for i in 1..n {
+        powers.push(powers[i - 1] * s);
+      }
+      powers
+    };
+
+    // generate a challenge
+    let rho = transcript.squeeze(b"r")?;
+    let num_claims = w_vec_padded.len();
+    let powers_of_rho = powers(&rho, num_claims);
+    let claim_batch_joint = u_vec_padded
+      .iter()
+      .zip(powers_of_rho.iter())
+      .map(|(u, p)| u.e * p)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
+
+    let mut polys_left: Vec<MultilinearPolynomial<E::Scalar>> = w_vec_padded
+      .iter()
+      .map(|w| MultilinearPolynomial::new(w.p.clone()))
+      .collect();
+    let mut polys_right: Vec<MultilinearPolynomial<E::Scalar>> = u_vec_padded
+      .iter()
+      .map(|u| MultilinearPolynomial::new(EqPolynomial::new(u.x.clone()).evals()))
+      .collect();
+
+    let num_rounds_z = u_vec_padded[0].x.len();
+    let comb_func = |poly_A_comp: &E::Scalar, poly_B_comp: &E::Scalar| -> E::Scalar {
+      *poly_A_comp * *poly_B_comp
+    };
+    let (sc_proof_batch_deleg, r_z, claims_batch) = SumcheckProof::<E>::prove_quad_batch_scaled(
+      &claim_batch_joint,
+      num_rounds_z,
+      &mut polys_left,
+      &mut polys_right,
+      &powers_of_rho,
+      comb_func,
       &mut transcript,
     )?;
-    Ok(Self::DelegatedProofPart { eval_arg_cc })
+
+    let (claims_batch_left, _): (Vec<E::Scalar>, Vec<E::Scalar>) = claims_batch;
+
+    transcript.absorb(b"l", &claims_batch_left.as_slice());
+
+    // we now combine evaluation claims at the same point rz into one
+    let gamma = transcript.squeeze(b"g")?;
+    let powers_of_gamma: Vec<E::Scalar> = powers(&gamma, num_claims);
+    let comm_joint = u_vec_padded
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(u, g_i)| u.c * *g_i)
+      .fold(Commitment::<E>::default(), |acc, item| acc + item);
+    let poly_joint = PolyEvalWitness::weighted_sum(&w_vec_padded, &powers_of_gamma);
+    let eval_joint = claims_batch_left
+      .iter()
+      .zip(powers_of_gamma.iter())
+      .map(|(e, g_i)| *e * *g_i)
+      .fold(E::Scalar::ZERO, |acc, item| acc + item);
+
+    let eval_arg_deleg = EE::prove(
+      ck,
+      &pk.pk_ee,
+      &mut transcript,
+      &comm_joint,
+      &poly_joint.p,
+      &r_z,
+      &eval_joint,
+    )?;
+
+    Ok(Self::DelegatedProofPart {
+      eval_arg_cc,
+      sc_proof_batch_deleg,
+      eval_arg_deleg,
+      evals_batch_deleg: claims_batch_left,
+    })
   }
 
   fn combine_proofs(
@@ -604,10 +848,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>, CC: CompCommitmentEngineTrait<E, E
       eval_E: prover_proof.eval_E,
       sc_proof_inner: prover_proof.sc_proof_inner,
       eval_W: prover_proof.eval_W,
-      sc_proof_batch: prover_proof.sc_proof_batch,
-      eval_E_prime: prover_proof.eval_E_prime,
-      eval_W_prime: prover_proof.eval_W_prime,
-      eval_arg: prover_proof.eval_arg,
+      sc_proof_batch_prover: prover_proof.sc_proof_batch_prover,
+      sc_proof_batch_deleg: delegated_proof.sc_proof_batch_deleg,
+      evals_batch_prover: prover_proof.evals_batch_prover,
+      evals_batch_deleg: delegated_proof.evals_batch_deleg,
+      eval_arg_prover: prover_proof.eval_arg_prover,
+      eval_arg_deleg: delegated_proof.eval_arg_deleg,
       eval_arg_cc: delegated_proof.eval_arg_cc,
     }
   }
