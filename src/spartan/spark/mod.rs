@@ -145,7 +145,7 @@ pub struct TrivialEvaluationArgument<G: Engine> {
 
 impl<E: Engine> TranscriptReprTrait<E::GE> for TrivialCommitment<E> {
   fn to_transcript_bytes(&self) -> Vec<u8> {
-    Vec::new() // self.S.to_transcript_bytes()
+    Vec::new()
   }
 }
 

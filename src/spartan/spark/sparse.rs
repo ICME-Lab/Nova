@@ -479,10 +479,10 @@ impl<E: Engine> SparseEvaluationArgument<E> {
       .row
       .iter()
       .zip(poly.row_read_ts.iter())
-      .zip(E_row.into_iter())
+      .zip(E_row)
       .zip(poly.col.iter())
       .zip(poly.col_read_ts.iter())
-      .zip(E_col.into_iter())
+      .zip(E_col)
       .map(|(((((x, y), z), m), n), q)| {
         *x + c * y + c * c * z + c * c * c * m + c * c * c * c * n + c * c * c * c * c * q
       })

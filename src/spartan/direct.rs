@@ -198,6 +198,7 @@ mod tests {
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
+    spartan::spark::{SparkEngine, TrivialCompComputationEngine},
   };
   use core::marker::PhantomData;
   use ff::PrimeField;
@@ -314,5 +315,17 @@ mod tests {
 
     // sanity: check the claimed output with a direct computation of the same
     assert_eq!(z_i, vec![<E as Engine>::Scalar::from(2460515u64)]);
+  }
+
+  #[test]
+  fn test_delegated_direct_snark() {
+    type E = PallasEngine;
+    type EE = crate::provider::ipa_pc::EvaluationEngine<E>;
+    type S =
+      crate::spartan::delegatedsnark::RelaxedR1CSSNARK<E, EE, TrivialCompComputationEngine<E, EE>>;
+    test_direct_snark_with::<E, S>();
+
+    type Spp = crate::spartan::delegatedsnark::RelaxedR1CSSNARK<E, EE, SparkEngine<E, EE>>;
+    test_direct_snark_with::<E, Spp>();
   }
 }

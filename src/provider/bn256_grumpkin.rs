@@ -2,8 +2,8 @@
 use crate::{
   impl_traits,
   provider::{
-    msm::msm_generic,
-    traits::{DlogGroup, PairingGroup},
+    msm::{msm, msm_small},
+    traits::{DlogGroup, DlogGroupExt, PairingGroup},
   },
   traits::{Group, PrimeFieldExt, TranscriptReprTrait},
 };
@@ -17,7 +17,8 @@ use halo2curves::{
   CurveAffine, CurveExt,
 };
 use num_bigint::BigInt;
-use num_traits::Num;
+use num_integer::Integer;
+use num_traits::{Num, ToPrimitive};
 use rayon::prelude::*;
 use sha3::Shake256;
 use std::io::Read;
@@ -32,13 +33,40 @@ pub mod grumpkin {
   pub use halo2curves::grumpkin::{Fq as Base, Fr as Scalar, G1Affine as Affine, G1 as Point};
 }
 
-impl_traits!(
+crate::impl_traits_no_dlog_ext!(
   bn256,
   Bn256Point,
   Bn256Affine,
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47"
 );
+
+impl DlogGroupExt for bn256::Point {
+  #[cfg(not(feature = "blitzar"))]
+  fn vartime_multiscalar_mul(scalars: &[Self::Scalar], bases: &[Self::AffineGroupElement]) -> Self {
+    msm(scalars, bases)
+  }
+
+  fn vartime_multiscalar_mul_small<T: Integer + Into<u64> + Copy + Sync + ToPrimitive>(
+    scalars: &[T],
+    bases: &[Self::AffineGroupElement],
+  ) -> Self {
+    msm_small(scalars, bases)
+  }
+
+  #[cfg(feature = "blitzar")]
+  fn vartime_multiscalar_mul(scalars: &[Self::Scalar], bases: &[Self::AffineGroupElement]) -> Self {
+    super::blitzar::vartime_multiscalar_mul(scalars, bases)
+  }
+
+  #[cfg(feature = "blitzar")]
+  fn batch_vartime_multiscalar_mul(
+    scalars: &[Vec<Self::Scalar>],
+    bases: &[Self::AffineGroupElement],
+  ) -> Vec<Self> {
+    super::blitzar::batch_vartime_multiscalar_mul(scalars, bases)
+  }
+}
 
 impl_traits!(
   grumpkin,
@@ -81,10 +109,6 @@ impl Group for G2 {
 
 impl DlogGroup for G2 {
   type AffineGroupElement = G2Affine;
-
-  fn vartime_multiscalar_mul(scalars: &[Self::Scalar], bases: &[Self::AffineGroupElement]) -> Self {
-    msm_generic(scalars, bases)
-  }
 
   fn affine(&self) -> Self::AffineGroupElement {
     self.to_affine()

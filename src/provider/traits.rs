@@ -4,6 +4,8 @@ use core::{
   ops::{Add, AddAssign, Sub, SubAssign},
 };
 use halo2curves::{serde::SerdeObject, CurveAffine};
+use num_integer::Integer;
+use num_traits::ToPrimitive;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +28,7 @@ impl<T, Rhs, Output> GroupOpsOwned<Rhs, Output> for T where T: for<'r> GroupOps<
 pub trait ScalarMulOwned<Rhs, Output = Self>: for<'r> ScalarMul<&'r Rhs, Output> {}
 impl<T, Rhs, Output> ScalarMulOwned<Rhs, Output> for T where T: for<'r> ScalarMul<&'r Rhs, Output> {}
 
-/// A trait that defines extensions to the Group trait
+/// A trait that defines the core discrete logarithm group functionality
 pub trait DlogGroup:
   Group
   + Serialize
@@ -49,20 +51,6 @@ pub trait DlogGroup:
     + CurveAffine
     + SerdeObject;
 
-  /// A method to compute a multiexponentation
-  fn vartime_multiscalar_mul(scalars: &[Self::Scalar], bases: &[Self::AffineGroupElement]) -> Self;
-
-  /// A method to compute a batch of multiexponentations
-  fn batch_vartime_multiscalar_mul(
-    scalars: &[Vec<Self::Scalar>],
-    bases: &[Self::AffineGroupElement],
-  ) -> Vec<Self> {
-    scalars
-      .par_iter()
-      .map(|scalar| Self::vartime_multiscalar_mul(scalar, &bases[..scalar.len()]))
-      .collect::<Vec<_>>()
-  }
-
   /// Produce a vector of group elements using a static label
   fn from_label(label: &'static [u8], n: usize) -> Vec<Self::AffineGroupElement>;
 
@@ -82,9 +70,43 @@ pub trait DlogGroup:
   fn to_coordinates(&self) -> (<Self as Group>::Base, <Self as Group>::Base, bool);
 }
 
+/// Extension trait for DlogGroup that provides multi-scalar multiplication operations
+pub trait DlogGroupExt: DlogGroup {
+  /// A method to compute a multiexponentation
+  fn vartime_multiscalar_mul(scalars: &[Self::Scalar], bases: &[Self::AffineGroupElement]) -> Self;
+
+  /// A method to compute a batch of multiexponentations
+  fn batch_vartime_multiscalar_mul(
+    scalars: &[Vec<Self::Scalar>],
+    bases: &[Self::AffineGroupElement],
+  ) -> Vec<Self> {
+    scalars
+      .par_iter()
+      .map(|scalar| Self::vartime_multiscalar_mul(scalar, &bases[..scalar.len()]))
+      .collect::<Vec<_>>()
+  }
+
+  /// A method to compute a multiexponentation with small scalars
+  fn vartime_multiscalar_mul_small<T: Integer + Into<u64> + Copy + Sync + ToPrimitive>(
+    scalars: &[T],
+    bases: &[Self::AffineGroupElement],
+  ) -> Self;
+
+  /// A method to compute a batch of multiexponentations with small scalars
+  fn batch_vartime_multiscalar_mul_small<T: Integer + Into<u64> + Copy + Sync + ToPrimitive>(
+    scalars: &[Vec<T>],
+    bases: &[Self::AffineGroupElement],
+  ) -> Vec<Self> {
+    scalars
+      .par_iter()
+      .map(|scalar| Self::vartime_multiscalar_mul_small(scalar, &bases[..scalar.len()]))
+      .collect::<Vec<_>>()
+  }
+}
+
 /// A trait that defines extensions to the DlogGroup trait, to be implemented for
 /// elliptic curve groups that are pairing friendly
-pub trait PairingGroup: DlogGroup {
+pub trait PairingGroup: DlogGroupExt {
   /// A type representing the second group
   type G2: DlogGroup<Scalar = Self::Scalar, Base = Self::Base>;
 
@@ -95,9 +117,9 @@ pub trait PairingGroup: DlogGroup {
   fn pairing(p: &Self, q: &Self::G2) -> Self::GT;
 }
 
-/// Implements Nova's traits
+/// Implements Nova's traits except DlogGroupExt so that the MSM can be implemented differently
 #[macro_export]
-macro_rules! impl_traits {
+macro_rules! impl_traits_no_dlog_ext {
   (
     $name:ident,
     $name_curve:ident,
@@ -121,13 +143,6 @@ macro_rules! impl_traits {
 
     impl DlogGroup for $name::Point {
       type AffineGroupElement = $name::Affine;
-
-      fn vartime_multiscalar_mul(
-        scalars: &[Self::Scalar],
-        bases: &[Self::AffineGroupElement],
-      ) -> Self {
-        msm_generic(scalars, bases)
-      }
 
       fn affine(&self) -> Self::AffineGroupElement {
         self.to_affine()
@@ -222,6 +237,42 @@ macro_rules! impl_traits {
         let x_bytes = coords.x().to_bytes().into_iter();
         let y_bytes = coords.y().to_bytes().into_iter();
         x_bytes.rev().chain(y_bytes.rev()).collect()
+      }
+    }
+  };
+}
+
+/// Implements Nova's traits
+#[macro_export]
+macro_rules! impl_traits {
+  (
+    $name:ident,
+    $name_curve:ident,
+    $name_curve_affine:ident,
+    $order_str:literal,
+    $base_str:literal
+  ) => {
+    $crate::impl_traits_no_dlog_ext!(
+      $name,
+      $name_curve,
+      $name_curve_affine,
+      $order_str,
+      $base_str
+    );
+
+    impl DlogGroupExt for $name::Point {
+      fn vartime_multiscalar_mul(
+        scalars: &[Self::Scalar],
+        bases: &[Self::AffineGroupElement],
+      ) -> Self {
+        msm(scalars, bases)
+      }
+
+      fn vartime_multiscalar_mul_small<T: Integer + Into<u64> + Copy + Sync + ToPrimitive>(
+        scalars: &[T],
+        bases: &[Self::AffineGroupElement],
+      ) -> Self {
+        msm_small(scalars, bases)
       }
     }
   };
