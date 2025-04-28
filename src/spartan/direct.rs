@@ -11,6 +11,7 @@ use crate::{
     Circuit, ConstraintSystem, SynthesisError,
   },
   r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  spartan::delegatedsnark::Delegatable,
   traits::{
     circuit::StepCircuit,
     commitment::CommitmentEngineTrait,
@@ -192,16 +193,90 @@ impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>, C: StepCircuit<E::Scalar>> DirectSN
   }
 }
 
+impl<E: Engine, S: Delegatable<E>, C: StepCircuit<E::Scalar>> DirectSNARK<E, S, C> {
+  /// Prepare instance and witness
+  pub fn setup_u_w(
+    pk: &ProverKey<E, S>,
+    sc: C,
+    z_i: &[E::Scalar],
+  ) -> Result<
+    (
+      Commitment<E>,
+      E::Scalar,
+      RelaxedR1CSInstance<E>,
+      RelaxedR1CSWitness<E>,
+    ),
+    NovaError,
+  > {
+    let mut cs = SatisfyingAssignment::<E>::new();
+
+    let circuit: DirectCircuit<E, C> = DirectCircuit {
+      z_i: Some(z_i.to_vec()),
+      sc,
+    };
+
+    let _ = circuit.synthesize(&mut cs);
+    let (u, w) = cs
+      .r1cs_instance_and_witness(&pk.S, &pk.ck)
+      .map_err(|_e| NovaError::UnSat {
+        reason: "Unable to generate a satisfying witness".to_string(),
+      })?;
+
+    // convert the instance and witness to relaxed form
+    let (u_relaxed, w_relaxed) = (
+      RelaxedR1CSInstance::from_r1cs_instance_unchecked(&u.comm_W, &u.X),
+      RelaxedR1CSWitness::from_r1cs_witness(&pk.S, &w),
+    );
+
+    let (derandom_w_relaxed, blind_W, blind_E) = w_relaxed.derandomize();
+    let derandom_u_relaxed = u_relaxed.derandomize(&E::CE::derand_key(&pk.ck), &blind_W, &blind_E);
+
+    Ok((
+      u.comm_W,
+      w_relaxed.r_W,
+      derandom_u_relaxed,
+      derandom_w_relaxed,
+    ))
+  }
+
+  /// Builds witness-related part of proof
+  pub fn prover_step(
+    pk: &ProverKey<E, S>,
+    u: &RelaxedR1CSInstance<E>,
+    w: &RelaxedR1CSWitness<E>,
+  ) -> Result<(S::ProverProofPart, (Vec<E::Scalar>, Vec<E::Scalar>)), NovaError> {
+    // prove the instance using Spartan
+    let (prover_part, r) = S::prover_step(&pk.ck, &pk.pk, &pk.S, u, w)?;
+
+    Ok((prover_part, r))
+  }
+
+  /// Builds non-witness-related part of proof
+  pub fn delegated_step(
+    pk: &ProverKey<E, S>,
+    r: (&[E::Scalar], &[E::Scalar]),
+  ) -> Result<S::DelegatedProofPart, NovaError> {
+    // prove the instance using Spartan
+    let delegated_part = S::delegated_step(&pk.ck, &pk.pk, &pk.S, r)?;
+
+    Ok(delegated_part)
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::{
-    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+    frontend::{
+      num::AllocatedNum, AllocatedBit, ConstraintSystem, LinearCombination, SynthesisError,
+    },
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
-    spartan::spark::{SparkEngine, TrivialCompComputationEngine},
+    spartan::spark::SparkEngine,
   };
   use core::marker::PhantomData;
-  use ff::PrimeField;
+  use ff::{PrimeField, PrimeFieldBits};
+  use rand::Rng;
+  use std::time::Instant;
 
   #[derive(Clone, Debug, Default)]
   struct CubicCircuit<F: PrimeField> {
@@ -317,15 +392,271 @@ mod tests {
     assert_eq!(z_i, vec![<E as Engine>::Scalar::from(2460515u64)]);
   }
 
+  #[derive(Clone, Debug)]
+  struct AndInstance<E: Engine> {
+    a: u64,
+    b: u64,
+    _p: PhantomData<E>,
+  }
+
+  impl<E: Engine> AndInstance<E> {
+    // produces an AND instance
+    fn new() -> Self {
+      let mut rng = rand::thread_rng();
+      let a: u64 = rng.gen();
+      let b: u64 = rng.gen();
+      Self {
+        a,
+        b,
+        _p: PhantomData,
+      }
+    }
+  }
+
+  #[derive(Clone, Debug)]
+  struct AndCircuit<E: Engine> {
+    batch: Vec<AndInstance<E>>,
+  }
+
+  impl<E: Engine> AndCircuit<E> {
+    // produces a batch of AND instances
+    fn new(num_ops_per_step: usize) -> Self {
+      let mut batch = Vec::new();
+      for _ in 0..num_ops_per_step {
+        batch.push(AndInstance::new());
+      }
+      Self { batch }
+    }
+  }
+
+  pub fn u64_into_bit_vec_le<Scalar: PrimeField, CS: ConstraintSystem<Scalar>>(
+    mut cs: CS,
+    value: Option<u64>,
+  ) -> Result<Vec<AllocatedBit>, SynthesisError> {
+    let values = match value {
+      Some(ref value) => {
+        let mut tmp = Vec::with_capacity(64);
+
+        for i in 0..64 {
+          tmp.push(Some((*value >> i) & 1 == 1));
+        }
+
+        tmp
+      }
+      None => vec![None; 64],
+    };
+
+    let bits = values
+      .into_iter()
+      .enumerate()
+      .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("bit {}", i)), b))
+      .collect::<Result<Vec<_>, SynthesisError>>()?;
+
+    Ok(bits)
+  }
+
+  /// Gets as input the little indian representation of a number and spits out the number
+  pub fn le_bits_to_num<Scalar, CS>(
+    mut cs: CS,
+    bits: &[AllocatedBit],
+  ) -> Result<AllocatedNum<Scalar>, SynthesisError>
+  where
+    Scalar: PrimeField + PrimeFieldBits,
+    CS: ConstraintSystem<Scalar>,
+  {
+    // We loop over the input bits and construct the constraint
+    // and the field element that corresponds to the result
+    let mut lc = LinearCombination::zero();
+    let mut coeff = Scalar::ONE;
+    let mut fe = Some(Scalar::ZERO);
+    for bit in bits.iter() {
+      lc = lc + (coeff, bit.get_variable());
+      fe = bit.get_value().map(|val| {
+        if val {
+          fe.unwrap() + coeff
+        } else {
+          fe.unwrap()
+        }
+      });
+      coeff = coeff.double();
+    }
+    let num = AllocatedNum::alloc(cs.namespace(|| "Field element"), || {
+      fe.ok_or(SynthesisError::AssignmentMissing)
+    })?;
+    lc = lc - num.get_variable();
+    cs.enforce(|| "compute number from bits", |lc| lc, |lc| lc, |_| lc);
+    Ok(num)
+  }
+
+  impl<E: Engine> StepCircuit<E::Scalar> for AndCircuit<E> {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+      &self,
+      cs: &mut CS,
+      z_in: &[AllocatedNum<E::Scalar>],
+    ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
+      for i in 0..self.batch.len() {
+        // allocate a and b as field elements
+        let a = AllocatedNum::alloc(cs.namespace(|| format!("a_{}", i)), || {
+          Ok(E::Scalar::from(self.batch[i].a))
+        })?;
+        let b = AllocatedNum::alloc(cs.namespace(|| format!("b_{}", i)), || {
+          Ok(E::Scalar::from(self.batch[i].b))
+        })?;
+
+        // obtain bit representations of a and b
+        let a_bits = u64_into_bit_vec_le(
+          cs.namespace(|| format!("a_bits_{}", i)),
+          Some(self.batch[i].a),
+        )?; // little endian
+        let b_bits = u64_into_bit_vec_le(
+          cs.namespace(|| format!("b_bits_{}", i)),
+          Some(self.batch[i].b),
+        )?; // little endian
+
+        // enforce that bits of a and b are correct
+        let a_from_bits = le_bits_to_num(cs.namespace(|| format!("a_{}", i)), &a_bits)?;
+        let b_from_bits = le_bits_to_num(cs.namespace(|| format!("b_{}", i)), &b_bits)?;
+
+        cs.enforce(
+          || format!("a_{} == a_from_bits", i),
+          |lc| lc + a.get_variable(),
+          |lc| lc + CS::one(),
+          |lc| lc + a_from_bits.get_variable(),
+        );
+        cs.enforce(
+          || format!("b_{} == b_from_bits", i),
+          |lc| lc + b.get_variable(),
+          |lc| lc + CS::one(),
+          |lc| lc + b_from_bits.get_variable(),
+        );
+
+        let mut c_bits = Vec::new();
+
+        // perform bitwise AND
+        for i in 0..64 {
+          let c_bit = AllocatedBit::and(
+            cs.namespace(|| format!("and_bit_{}", i)),
+            &a_bits[i],
+            &b_bits[i],
+          )?;
+          c_bits.push(c_bit);
+        }
+
+        // convert back to an allocated num
+        let c_from_bits = le_bits_to_num(cs.namespace(|| format!("c_{}", i)), &c_bits)?;
+
+        let c = AllocatedNum::alloc(cs.namespace(|| format!("c_{}", i)), || {
+          Ok(E::Scalar::from(self.batch[i].a & self.batch[i].b))
+        })?;
+
+        // enforce that c is correct
+        cs.enforce(
+          || format!("c_{} == c_from_bits", i),
+          |lc| lc + c.get_variable(),
+          |lc| lc + CS::one(),
+          |lc| lc + c_from_bits.get_variable(),
+        );
+      }
+
+      Ok(z_in.to_vec())
+    }
+  }
+
+  impl<E: Engine> AndCircuit<E> {
+    fn output(&self, z: &[E::Scalar]) -> Vec<E::Scalar> {
+      vec![z[0]]
+    }
+  }
+
   #[test]
   fn test_delegated_direct_snark() {
     type E = PallasEngine;
     type EE = crate::provider::ipa_pc::EvaluationEngine<E>;
-    type S =
-      crate::spartan::delegatedsnark::RelaxedR1CSSNARK<E, EE, TrivialCompComputationEngine<E, EE>>;
-    test_direct_snark_with::<E, S>();
 
-    type Spp = crate::spartan::delegatedsnark::RelaxedR1CSSNARK<E, EE, SparkEngine<E, EE>>;
-    test_direct_snark_with::<E, Spp>();
+    type Spp = crate::spartan::delegatedsnark::RelaxedR1CSSNARK<E, EE, SparkEngine<E>>;
+    test_direct_deleg_snark_with::<E, Spp>("Delegaged SNARK", 1);
+  }
+
+  fn test_direct_deleg_snark_with<E: Engine, S: Delegatable<E>>(
+    proof_type: &str,
+    num_steps: usize,
+  ) {
+    let circuit = AndCircuit::new(num_steps);
+
+    // produce keys
+    let (pk, vk) = DirectSNARK::<E, S, AndCircuit<E>>::setup(circuit.clone()).unwrap();
+
+    // setup inputs
+    let z0 = vec![<E as Engine>::Scalar::ZERO];
+    let mut z_i = z0;
+
+    let total = Instant::now();
+    // produce a SNARK
+    let (comm_W, r_W, u, w) =
+      DirectSNARK::<E, S, AndCircuit<E>>::setup_u_w(&pk, circuit.clone(), &z_i).unwrap();
+
+    let start = Instant::now();
+    let (prover_step, r) = DirectSNARK::<E, S, AndCircuit<E>>::prover_step(&pk, &u, &w).unwrap();
+    println!(
+      "Time elapsed for witness-related part of proving with {} is: {:?}",
+      proof_type,
+      start.elapsed()
+    );
+
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    bincode::serialize_into(&mut encoder, &prover_step).unwrap();
+    let compressed_prover_step_encoded = encoder.finish().unwrap();
+    println!(
+      "Compressed prover step len {:?} bytes",
+      compressed_prover_step_encoded.len()
+    );
+
+    let r = (r.0.as_slice(), r.1.as_slice());
+    let start = Instant::now();
+    let delegated_step = DirectSNARK::<E, S, AndCircuit<E>>::delegated_step(&pk, r).unwrap();
+    println!(
+      "Time elapsed for delegated part of proving with {} is: {:?}",
+      proof_type,
+      start.elapsed()
+    );
+
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    bincode::serialize_into(&mut encoder, &delegated_step).unwrap();
+    let compressed_delegated_step_encoded = encoder.finish().unwrap();
+    println!(
+      "Compressed delegated step len {:?} bytes",
+      compressed_delegated_step_encoded.len()
+    );
+
+    println!(
+      "Total time elapsed for proving with {} is: {:?}\n",
+      proof_type,
+      total.elapsed()
+    );
+
+    let z_i_plus_one = circuit.output(&z_i);
+
+    let snark = DirectSNARK::<E, S, AndCircuit<E>> {
+      comm_W,
+      blind_r_W: r_W,
+      snark: S::combine_proofs(prover_step, delegated_step),
+      _p: PhantomData,
+    };
+
+    // verify the SNARK
+    let io = z_i
+      .clone()
+      .into_iter()
+      .chain(z_i_plus_one.clone())
+      .collect::<Vec<_>>();
+    let res = snark.verify(&vk, &io);
+    assert!(res.is_ok());
+
+    // set input to the next step
+    z_i.clone_from(&z_i_plus_one);
   }
 }
