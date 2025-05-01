@@ -28,6 +28,7 @@ pub mod traits;
 mod constants;
 mod digest;
 mod r1cs;
+mod ccs;
 
 use traits::{commitment::CommitmentEngineTrait, Engine};
 

@@ -18,6 +18,7 @@ pub use gadgets::{
 pub use lc::{Index, LinearCombination, Variable};
 
 pub mod r1cs;
+pub mod ccs;
 pub mod shape_cs;
 pub mod solver;
 pub mod test_shape_cs;
