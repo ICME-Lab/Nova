@@ -20,7 +20,7 @@ use rand_core::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-mod sparse;
+pub mod sparse;
 pub(crate) use sparse::SparseMatrix;
 
 /// A type that holds the shape of the R1CS matrices

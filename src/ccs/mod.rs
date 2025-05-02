@@ -22,8 +22,7 @@ use crate::traits::ROTrait;
 use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 
-mod sparse;
-pub(crate) use sparse::SparseMatrix;
+use crate::r1cs::sparse::SparseMatrix;
 
 /// A CCS shape object: defines constraints via linear combinations of matrices
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,10 +172,8 @@ impl<E: Engine> CCSShape<E> {
     U: &CCSInstance<E>,
     W: &CCSWitness<E>,
   ) -> Result<(), NovaError> {
-    let z = [&U.X[..], &W.W[..]].concat();
-    
+    let z = [&U.X[..], &[E::Scalar::ONE], &W.W[..]].concat();
     let Mzs = self.multiply_all_Ms(&z)?;
-
 
     let mut acc = vec![E::Scalar::ZERO; self.num_cons];
     for (c, S) in &self.cSs {
@@ -375,8 +372,6 @@ impl<E: Engine> CCSInstance<E> {
     }
   }
 }
-
-
 
 impl<E: Engine> AbsorbInROTrait<E> for CCSInstance<E> {
   fn absorb_in_ro(&self, ro: &mut E::RO) {
@@ -669,7 +664,7 @@ mod tests {
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     traits::{Engine},
   };
-  pub(crate) use sparse::SparseMatrix;
+  use crate::r1cs::sparse::SparseMatrix;
 
   fn tiny_ccs<E: Engine>(num_vars: usize) -> CCSShape<E> {
     let one = E::Scalar::ONE;
@@ -789,11 +784,93 @@ mod tests {
     );
   }
 
+  fn cubic_ccs<E: Engine>() -> CCSShape<E> {
+    let one = E::Scalar::ONE;
+    let num_vars = 1;
+    let num_io = 1;
+    let num_cols = num_vars + num_io + 1; // [x, u, w]
+
+    // M0(z) = x, M1(z) = w
+    let M0_entries = vec![(0, 0, one)];     // selects x
+    let M1_entries = vec![(0, 2, one)];     // selects w
+
+    let M0 = SparseMatrix::new(&M0_entries, 1, num_cols);
+    let M1 = SparseMatrix::new(&M1_entries, 1, num_cols);
+
+    // Constraint: x * w * w - 1 = 0
+    let Ms = vec![M0, M1];
+    let cSs = vec![
+        (one, vec![0, 1, 1]),  // M0 * M1 * M1
+        (-one, vec![]),        // -1 (via u = 1, absorbed in constant)
+    ];
+
+    CCSShape::new(1, num_vars, num_io, Ms, cSs)
+  }
+
+  fn test_cubic_manual_ccs_with<E: Engine>() {
+    let shape = cubic_ccs::<E>();
+    let ck = shape.commitment_key(&|s| {
+      s.Ms.len().max(s.num_cons).max(s.num_vars).max(s.num_io + s.num_vars + 1)
+    });
+
+    // Choose values so x * w^2 = 1, e.g. x = 1, w = 1
+    let X = vec![E::Scalar::ONE]; // x = 1
+    let u = E::Scalar::ONE;
+    let W = vec![E::Scalar::ONE]; // w = 1
+    let r_W = E::Scalar::random(&mut OsRng);
+
+    let z = [&X[..], &[u], &W[..]].concat();
+    let Mzs = shape.multiply_all_Ms(&z).unwrap();
+
+    let mut acc = vec![E::Scalar::ZERO; shape.num_cons];
+    for (c, S) in &shape.cSs {
+        let mut term = vec![*c; shape.num_cons];
+        for &idx in S {
+            term
+                .iter_mut()
+                .zip(Mzs[idx].iter())
+                .for_each(|(t, v)| *t *= v);
+        }
+        acc.iter_mut().zip(term).for_each(|(a, t)| *a += t);
+    }
+
+    let E_vec = acc;
+    let r_E = E::Scalar::random(&mut OsRng);
+    let comm_W = CE::<E>::commit(&ck, &W, &r_W);
+    let comm_E = CE::<E>::commit(&ck, &E_vec, &r_E);
+
+    let relaxed_inst = CCSRelaxedInstance {
+        comm_W,
+        comm_E,
+        X: X.clone(),
+        u,
+    };
+
+    let relaxed_wit = CCSRelaxedWitness {
+        W,
+        r_W,
+        E: E_vec,
+        r_E,
+    };
+
+    assert!(
+        shape.is_sat_relaxed(&ck, &relaxed_inst, &relaxed_wit).is_ok(),
+        "Cubic CCS instance should be satisfiable"
+    );
+  }
+
   #[test]
   fn test_sample_random_ccs() {
     test_sample_manual_ccs_with::<PallasEngine>();
     test_sample_manual_ccs_with::<Bn256EngineKZG>();
     test_sample_manual_ccs_with::<Secp256k1Engine>();
-}
+  }
+
+  #[test]
+  fn test_cubic_ccs() {
+      test_cubic_manual_ccs_with::<PallasEngine>();
+      test_cubic_manual_ccs_with::<Bn256EngineKZG>();
+      test_cubic_manual_ccs_with::<Secp256k1Engine>();
+  }
 }
 
