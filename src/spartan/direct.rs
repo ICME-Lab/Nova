@@ -114,6 +114,16 @@ where
 }
 
 impl<E: Engine, S: RelaxedR1CSSNARKTrait<E>, C: StepCircuit<E::Scalar>> DirectSNARK<E, S, C> {
+  /// Creates a new direct SNARK
+  pub fn new(comm_W: Commitment<E>, blind_r_W: E::Scalar, snark: S) -> Self {
+    DirectSNARK {
+      comm_W,
+      blind_r_W,
+      snark,
+      _p: PhantomData,
+    }
+  }
+
   /// Produces prover and verifier keys for the direct SNARK
   pub fn setup(sc: C) -> Result<(ProverKey<E, S>, VerifierKey<E, S>), NovaError> {
     // construct a circuit that can be synthesized
@@ -640,12 +650,11 @@ mod tests {
 
     let z_i_plus_one = circuit.output(&z_i);
 
-    let snark = DirectSNARK::<E, S, AndCircuit<E>> {
+    let snark = DirectSNARK::<E, S, AndCircuit<E>>::new(
       comm_W,
-      blind_r_W: r_W,
-      snark: S::combine_proofs(prover_step, delegated_step),
-      _p: PhantomData,
-    };
+      r_W,
+      S::combine_proofs(prover_step, delegated_step),
+    );
 
     // verify the SNARK
     let io = z_i

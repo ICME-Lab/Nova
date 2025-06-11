@@ -10,65 +10,6 @@ use crate::{
 use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
 
-/* /// A type that holds a witness to a polynomial evaluation instance
-#[allow(dead_code)]
-pub struct PolyEvalWitness<E: Engine> {
-  p: Vec<E::Scalar>, // polynomial
-}
-
-impl<E: Engine> PolyEvalWitness<E> {
-  fn pad(W: &[PolyEvalWitness<E>]) -> Vec<PolyEvalWitness<E>> {
-    // determine the maximum size
-    if let Some(n) = W.iter().map(|w| w.p.len()).max() {
-      W.iter()
-        .map(|w| {
-          let mut p = w.p.clone();
-          p.resize(n, E::Scalar::ZERO);
-          PolyEvalWitness { p }
-        })
-        .collect()
-    } else {
-      Vec::new()
-    }
-  }
-
-  fn weighted_sum(W: &[PolyEvalWitness<E>], s: &[E::Scalar]) -> PolyEvalWitness<E> {
-    assert_eq!(W.len(), s.len());
-    let mut p = vec![E::Scalar::ZERO; W[0].p.len()];
-    for i in 0..W.len() {
-      for j in 0..W[i].p.len() {
-        p[j] += W[i].p[j] * s[i]
-      }
-    }
-    PolyEvalWitness { p }
-  }
-}
-
-/// A type that holds a polynomial evaluation instance
-#[allow(dead_code)]
-pub struct PolyEvalInstance<G: Engine> {
-  c: Commitment<G>,  // commitment to the polynomial
-  x: Vec<G::Scalar>, // evaluation point
-  e: G::Scalar,      // claimed evaluation
-}
-
-impl<G: Engine> PolyEvalInstance<G> {
-  fn pad(U: &[PolyEvalInstance<G>]) -> Vec<PolyEvalInstance<G>> {
-    // determine the maximum size
-    if let Some(ell) = U.iter().map(|u| u.x.len()).max() {
-      U.iter()
-        .map(|u| {
-          let mut x = vec![G::Scalar::ZERO; ell - u.x.len()];
-          x.extend(u.x.clone());
-          PolyEvalInstance { c: u.c, x, e: u.e }
-        })
-        .collect()
-    } else {
-      Vec::new()
-    }
-  }
-} */
-
 /// Engine to compute the commitment and decommitment for the Spark protocol
 pub trait CompCommitmentEngineTrait<E: Engine> {
   /// A type that holds opening hint

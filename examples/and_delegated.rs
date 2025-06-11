@@ -198,7 +198,7 @@ impl<G: Group> StepCircuit<G::Scalar> for AndCircuit<G> {
   }
 }
 
-/// cargo run --release --example and
+/// cargo run --release --example and_delegated
 fn main() {
   println!("=========================================================");
   println!("Nova-based 64-bit bitwise AND example");
