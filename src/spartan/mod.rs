@@ -162,6 +162,32 @@ impl<E: Engine> PolyEvalWitness<E> {
 
     PolyEvalWitness { p }
   }
+
+  fn pad(W: &[PolyEvalWitness<E>]) -> Vec<PolyEvalWitness<E>> {
+    // determine the maximum size
+    if let Some(n) = W.iter().map(|w| w.p.len()).max() {
+      W.iter()
+        .map(|w| {
+          let mut p = w.p.clone();
+          p.resize(n, E::Scalar::ZERO);
+          PolyEvalWitness { p }
+        })
+        .collect()
+    } else {
+      Vec::new()
+    }
+  }
+
+  fn weighted_sum(W: &[PolyEvalWitness<E>], s: &[E::Scalar]) -> PolyEvalWitness<E> {
+    assert_eq!(W.len(), s.len());
+    let mut p = vec![E::Scalar::ZERO; W[0].p.len()];
+    for i in 0..W.len() {
+      for j in 0..W[i].p.len() {
+        p[j] += W[i].p[j] * s[i]
+      }
+    }
+    PolyEvalWitness { p }
+  }
 }
 
 /// A type that holds a polynomial evaluation instance
@@ -236,6 +262,21 @@ impl<E: Engine> PolyEvalInstance<E> {
       c,
       x: x.to_vec(),
       e,
+    }
+  }
+
+  fn pad(U: &[PolyEvalInstance<E>]) -> Vec<PolyEvalInstance<E>> {
+    // determine the maximum size
+    if let Some(ell) = U.iter().map(|u| u.x.len()).max() {
+      U.iter()
+        .map(|u| {
+          let mut x = vec![E::Scalar::ZERO; ell - u.x.len()];
+          x.extend(u.x.clone());
+          PolyEvalInstance { c: u.c, x, e: u.e }
+        })
+        .collect()
+    } else {
+      Vec::new()
     }
   }
 }

@@ -21,8 +21,8 @@ type E1 = Bn256EngineKZG;
 type E2 = GrumpkinEngine;
 type EE1 = nova_snark::provider::hyperkzg::EvaluationEngine<E1>;
 type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<E2>;
-type S1 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E1, EE1, SparkEngine<E1, EE1>>;
-type S2 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E2, EE2, SparkEngine<E2, EE2>>;
+type S1 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E1, EE1, SparkEngine<E1>>;
+type S2 = nova_snark::spartan::delegatedsnark::RelaxedR1CSSNARK<E2, EE2, SparkEngine<E2>>;
 
 #[derive(Clone, Debug)]
 struct AndInstance<G: Group> {
@@ -198,7 +198,7 @@ impl<G: Group> StepCircuit<G::Scalar> for AndCircuit<G> {
   }
 }
 
-/// cargo run --release --example and
+/// cargo run --release --example and_delegated
 fn main() {
   println!("=========================================================");
   println!("Nova-based 64-bit bitwise AND example");
